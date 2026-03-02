@@ -5,6 +5,9 @@
 #include "K2Node_SpawnActorFromClass.h"
 #include "EdGraphSchema_K2.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
 #include "Json.h"
 
 UK2Node* FUtilityNodeCreator::CreatePrintNode(UEdGraph* Graph, const TSharedPtr<FJsonObject>& Params)
@@ -156,5 +159,67 @@ UK2Node* FUtilityNodeCreator::CreateSpawnActorNode(UEdGraph* Graph, const TShare
 	FNodeCreatorUtils::InitializeK2Node(SpawnActorNode, Graph);
 
 	return SpawnActorNode;
+}
+
+UK2Node* FUtilityNodeCreator::CreateEngineCallNode(UEdGraph* Graph, const TSharedPtr<FJsonObject>& Params)
+{
+	if (!Graph || !Params.IsValid())
+	{
+		return nullptr;
+	}
+
+	FString TargetFunction;
+	if (!Params->TryGetStringField(TEXT("target_function"), TargetFunction))
+	{
+		return nullptr;
+	}
+
+	// Explicit lookup table: friendly name -> (owner class, exact UFunction name).
+	// Function names verified against UE 5.6 source headers.
+	UClass* OwnerClass = nullptr;
+	FName FuncName;
+
+	// AActor functions
+	if      (TargetFunction.Equals(TEXT("GetActorLocation"),   ESearchCase::IgnoreCase)) { OwnerClass = AActor::StaticClass();                FuncName = FName("K2_GetActorLocation"); }
+	else if (TargetFunction.Equals(TEXT("GetDistanceTo"),      ESearchCase::IgnoreCase)) { OwnerClass = AActor::StaticClass();                FuncName = FName("GetDistanceTo");        }
+	else if (TargetFunction.Equals(TEXT("DestroyActor"),       ESearchCase::IgnoreCase)) { OwnerClass = AActor::StaticClass();                FuncName = FName("K2_DestroyActor");      }
+	// APawn functions
+	else if (TargetFunction.Equals(TEXT("GetController"),      ESearchCase::IgnoreCase)) { OwnerClass = APawn::StaticClass();                 FuncName = FName("GetController");        }
+	else if (TargetFunction.Equals(TEXT("AddMovementInput"),   ESearchCase::IgnoreCase)) { OwnerClass = APawn::StaticClass();                 FuncName = FName("AddMovementInput");     }
+	// UGameplayStatics functions (static, no self pin)
+	else if (TargetFunction.Equals(TEXT("GetPlayerCharacter"), ESearchCase::IgnoreCase)) { OwnerClass = UGameplayStatics::StaticClass();      FuncName = FName("GetPlayerCharacter");   }
+	else if (TargetFunction.Equals(TEXT("ApplyDamage"),        ESearchCase::IgnoreCase)) { OwnerClass = UGameplayStatics::StaticClass();      FuncName = FName("ApplyDamage");          }
+	// UKismetSystemLibrary functions (static)
+	else if (TargetFunction.Equals(TEXT("IsValid"),            ESearchCase::IgnoreCase)) { OwnerClass = UKismetSystemLibrary::StaticClass();  FuncName = FName("IsValid");              }
+
+	if (!OwnerClass)
+	{
+		return nullptr;
+	}
+
+	UFunction* TargetFunc = OwnerClass->FindFunctionByName(FuncName);
+	if (!TargetFunc)
+	{
+		return nullptr;
+	}
+
+	UK2Node_CallFunction* CallNode = NewObject<UK2Node_CallFunction>(Graph);
+	if (!CallNode)
+	{
+		return nullptr;
+	}
+
+	// SetFromFunction must be called before graph insertion and pin allocation
+	CallNode->SetFromFunction(TargetFunc);
+
+	double PosX, PosY;
+	FNodeCreatorUtils::ExtractNodePosition(Params, PosX, PosY);
+	CallNode->NodePosX = static_cast<int32>(PosX);
+	CallNode->NodePosY = static_cast<int32>(PosY);
+
+	Graph->AddNode(CallNode, true, false);
+	FNodeCreatorUtils::InitializeK2Node(CallNode, Graph);
+
+	return CallNode;
 }
 

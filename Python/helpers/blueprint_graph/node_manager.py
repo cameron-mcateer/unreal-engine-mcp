@@ -270,6 +270,48 @@ def add_call_function_node(
     )
 
 
+def add_engine_call_node(
+    unreal_connection,
+    blueprint_name: str,
+    target_function: str,
+    pos_x: float = 0,
+    pos_y: float = 0
+) -> Dict[str, Any]:
+    """
+    Add an EngineCall node for a known engine function by friendly name.
+
+    Resolves the UFunction directly from its owner class — no fuzzy lookup.
+
+    Args:
+        unreal_connection: Connection to Unreal Engine
+        blueprint_name: Name of the Blueprint
+        target_function: One of the supported engine functions:
+            Actor     : GetActorLocation, GetDistanceTo, DestroyActor
+            Pawn      : GetController, AddMovementInput
+            Statics   : GetPlayerCharacter, ApplyDamage
+            Utility   : IsValid
+        pos_x: X position in graph
+        pos_y: Y position in graph
+
+    Returns:
+        Dictionary containing node_id and status
+
+    Example:
+        >>> add_engine_call_node(unreal, "BP_Enemy", "GetActorLocation", 200, 100)
+        >>> add_engine_call_node(unreal, "BP_Enemy", "ApplyDamage", 400, 200)
+    """
+    return add_node(
+        unreal_connection,
+        blueprint_name,
+        "EngineCall",
+        {
+            "pos_x": pos_x,
+            "pos_y": pos_y,
+            "target_function": target_function
+        }
+    )
+
+
 def add_math_operator_node(
     unreal_connection,
     blueprint_name: str,

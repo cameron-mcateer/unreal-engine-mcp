@@ -44,4 +44,20 @@ public:
 	 * @return The created node or nullptr on error
 	 */
 	static UK2Node* CreateSpawnActorNode(UEdGraph* Graph, const TSharedPtr<class FJsonObject>& Params);
+
+	/**
+	 * Creates a CallFunction node for a known engine function by friendly name.
+	 * Bypasses fuzzy lookup by resolving the UFunction directly from its owner class.
+	 *
+	 * @param Graph  - The graph to add the node to
+	 * @param Params - JSON parameters:
+	 *                   - pos_x, pos_y       : graph position
+	 *                   - target_function    : friendly name from the supported set:
+	 *                       Actor     : GetActorLocation, GetDistanceTo, DestroyActor
+	 *                       Pawn      : GetController, AddMovementInput
+	 *                       Statics   : GetPlayerCharacter, ApplyDamage
+	 *                       Utility   : IsValid
+	 * @return The created node or nullptr on error
+	 */
+	static UK2Node* CreateEngineCallNode(UEdGraph* Graph, const TSharedPtr<class FJsonObject>& Params);
 };

@@ -2066,6 +2066,10 @@ def add_node(
                 "CallFunction" - Call any blueprint/engine function (⚠️ function must exist)
                 "Select" - Choose between two inputs based on boolean condition
                 "SpawnActor" - Spawn actor from class (⚠️ class must derive from Actor)
+                "EngineCall" - Call a known engine function by friendly name (use target_function=)
+                    Supported: GetActorLocation, GetDistanceTo, DestroyActor,
+                               GetController, AddMovementInput,
+                               GetPlayerCharacter, ApplyDamage, IsValid
 
             MATH (K2Node_PromotableOperator – type-promotes automatically when wired):
                 "MathOperator" - Math/comparison operator node. Requires operator= parameter.
