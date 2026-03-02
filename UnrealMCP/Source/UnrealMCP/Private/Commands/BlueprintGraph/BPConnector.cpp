@@ -145,8 +145,23 @@ TSharedPtr<FJsonObject> FBPConnector::ConnectNodes(const TSharedPtr<FJsonObject>
         return Result;
     }
 
-    // Create connection
-    SourcePin->MakeLinkTo(TargetPin);
+    // Create connection via the schema so nodes receive NotifyPinConnectionListChanged,
+    // which triggers type promotion on K2Node_PromotableOperator.
+    const UEdGraphSchema_K2* Schema = Cast<UEdGraphSchema_K2>(Graph->GetSchema());
+    if (!Schema)
+    {
+        Result->SetBoolField("success", false);
+        Result->SetStringField("error", "Failed to get K2 schema");
+        return Result;
+    }
+
+    const bool bConnected = Schema->TryCreateConnection(SourcePin, TargetPin);
+    if (!bConnected)
+    {
+        Result->SetBoolField("success", false);
+        Result->SetStringField("error", "Schema rejected the connection");
+        return Result;
+    }
 
     // Recompile
     Blueprint->MarkPackageDirty();
@@ -218,5 +233,14 @@ bool FBPConnector::ArePinsCompatible(UEdGraphPin* SourcePin, UEdGraphPin* Target
         return false;
     }
 
-    return SourcePin->PinType.PinCategory == TargetPin->PinType.PinCategory;
+    // Wildcard pins (e.g. K2Node_PromotableOperator inputs before type promotion)
+    // accept any type — let the schema handle promotion via TryCreateConnection.
+    const FName& SrcCat = SourcePin->PinType.PinCategory;
+    const FName& TgtCat = TargetPin->PinType.PinCategory;
+    if (SrcCat == UEdGraphSchema_K2::PC_Wildcard || TgtCat == UEdGraphSchema_K2::PC_Wildcard)
+    {
+        return true;
+    }
+
+    return SrcCat == TgtCat;
 }
