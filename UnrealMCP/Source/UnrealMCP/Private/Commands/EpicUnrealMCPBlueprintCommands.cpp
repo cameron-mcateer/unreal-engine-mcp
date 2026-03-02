@@ -1463,7 +1463,15 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetBlueprintVaria
         TSharedPtr<FJsonObject> VarObj = MakeShared<FJsonObject>();
         VarObj->SetStringField(TEXT("name"), Variable.VarName.ToString());
         VarObj->SetStringField(TEXT("type"), Variable.VarType.PinCategory.ToString());
-        VarObj->SetStringField(TEXT("sub_category"), Variable.VarType.PinSubCategory.ToString());
+        // PinSubCategory holds the sub-type for primitives (e.g. "float" on PC_Real).
+        // PinSubCategoryObject holds the UClass/UScriptStruct for object/struct types.
+        // Prefer the object name when available so callers see "Character" not "None".
+        FString SubCategoryStr = Variable.VarType.PinSubCategory.ToString();
+        if (Variable.VarType.PinSubCategoryObject.IsValid())
+        {
+            SubCategoryStr = Variable.VarType.PinSubCategoryObject->GetName();
+        }
+        VarObj->SetStringField(TEXT("sub_category"), SubCategoryStr);
         VarObj->SetStringField(TEXT("default_value"), Variable.DefaultValue);
         VarObj->SetStringField(TEXT("friendly_name"), Variable.FriendlyName.IsEmpty() ? Variable.VarName.ToString() : Variable.FriendlyName);
         

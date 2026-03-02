@@ -9,6 +9,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "PropertyEditorModule.h"
 #include "Modules/ModuleManager.h"
+#include "UObject/UObjectGlobals.h"
 
 TSharedPtr<FJsonObject> FBPVariables::CreateVariable(const TSharedPtr<FJsonObject>& Params)
 {
@@ -31,7 +32,14 @@ TSharedPtr<FJsonObject> FBPVariables::CreateVariable(const TSharedPtr<FJsonObjec
         return Result;
     }
 
-    FEdGraphPinType VarType = GetPinTypeFromString(VariableType);
+    bool bTypeResolved = false;
+    FEdGraphPinType VarType = GetPinTypeFromString(VariableType, bTypeResolved);
+    if (!bTypeResolved)
+    {
+        Result->SetBoolField("success", false);
+        Result->SetStringField("error", FString::Printf(TEXT("Unknown variable type: '%s'"), *VariableType));
+        return Result;
+    }
     FName VarName = FName(*VariableName);
 
     if (FBlueprintEditorUtils::AddMemberVariable(Blueprint, VarName, VarType))
@@ -144,8 +152,35 @@ TSharedPtr<FJsonObject> FBPVariables::SetVariableProperties(const TSharedPtr<FJs
     if (Params->HasField(TEXT("var_type")))
     {
         FString TypeString = Params->GetStringField(TEXT("var_type"));
-        FEdGraphPinType NewType = GetPinTypeFromString(TypeString);
+
+        bool bTypeResolved = false;
+        FEdGraphPinType NewType = GetPinTypeFromString(TypeString, bTypeResolved);
+        if (!bTypeResolved)
+        {
+            Result->SetBoolField("success", false);
+            Result->SetStringField("error", FString::Printf(
+                TEXT("Unknown variable type: '%s'. For object types use the class name without prefix (e.g. 'Character', 'Actor', 'Pawn', 'Controller')."),
+                *TypeString));
+            return Result;
+        }
+
+        // Apply the type change directly. ChangeMemberVariableType triggers its own
+        // Blueprint compilation which causes a TaskGraph recursion crash from the MCP
+        // thread context. Direct assignment is safe — the compile at the end of this
+        // function picks up the new type and propagates it to graph nodes.
         VarDesc->VarType = NewType;
+
+        // Verify the assignment was accepted
+        if (VarDesc->VarType.PinCategory != NewType.PinCategory ||
+            VarDesc->VarType.PinSubCategoryObject != NewType.PinSubCategoryObject)
+        {
+            Result->SetBoolField("success", false);
+            Result->SetStringField("error", FString::Printf(
+                TEXT("Type change to '%s' was not applied (got category=%s)."),
+                *TypeString, *VarDesc->VarType.PinCategory.ToString()));
+            return Result;
+        }
+
         UpdatedProperties->SetStringField("var_type", TypeString);
     }
 
@@ -393,42 +428,61 @@ TSharedPtr<FJsonObject> FBPVariables::SetVariableProperties(const TSharedPtr<FJs
     return Result;
 }
 
-FEdGraphPinType FBPVariables::GetPinTypeFromString(const FString& TypeString)
+FEdGraphPinType FBPVariables::GetPinTypeFromString(const FString& TypeString, bool& bOutSuccess)
 {
     FEdGraphPinType PinType;
+    bOutSuccess = true;
 
-    if (TypeString == "bool")
+    if (TypeString.Equals(TEXT("bool"), ESearchCase::IgnoreCase))
     {
         PinType.PinCategory = UEdGraphSchema_K2::PC_Boolean;
     }
-    else if (TypeString == "int")
+    else if (TypeString.Equals(TEXT("int"), ESearchCase::IgnoreCase))
     {
         PinType.PinCategory = UEdGraphSchema_K2::PC_Int;
     }
-    else if (TypeString == "float")
+    else if (TypeString.Equals(TEXT("float"), ESearchCase::IgnoreCase) ||
+             TypeString.Equals(TEXT("double"), ESearchCase::IgnoreCase))
     {
         PinType.PinCategory = UEdGraphSchema_K2::PC_Real;
         PinType.PinSubCategory = UEdGraphSchema_K2::PC_Float;
     }
-    else if (TypeString == "string")
+    else if (TypeString.Equals(TEXT("string"), ESearchCase::IgnoreCase))
     {
         PinType.PinCategory = UEdGraphSchema_K2::PC_String;
     }
-    else if (TypeString == "vector")
+    else if (TypeString.Equals(TEXT("vector"), ESearchCase::IgnoreCase))
     {
         PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
         PinType.PinSubCategoryObject = TBaseStructure<FVector>::Get();
     }
-    else if (TypeString == "rotator")
+    else if (TypeString.Equals(TEXT("rotator"), ESearchCase::IgnoreCase))
     {
         PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
         PinType.PinSubCategoryObject = TBaseStructure<FRotator>::Get();
     }
     else
     {
-        // Défaut: float
-        PinType.PinCategory = UEdGraphSchema_K2::PC_Real;
-        PinType.PinSubCategory = UEdGraphSchema_K2::PC_Float;
+        // Treat as an object reference.
+        // UE class objects are registered without the A/U prefix ("Character" not "ACharacter"),
+        // so try the string as-is first, then strip a leading A/U prefix if present.
+        UClass* FoundClass = FindFirstObject<UClass>(*TypeString, EFindFirstObjectOptions::None);
+
+        if (!FoundClass && TypeString.Len() > 1 &&
+            (TypeString[0] == TEXT('A') || TypeString[0] == TEXT('U')))
+        {
+            FoundClass = FindFirstObject<UClass>(*TypeString.Mid(1), EFindFirstObjectOptions::None);
+        }
+
+        if (FoundClass)
+        {
+            PinType.PinCategory = UEdGraphSchema_K2::PC_Object;
+            PinType.PinSubCategoryObject = FoundClass;
+        }
+        else
+        {
+            bOutSuccess = false;
+        }
     }
 
     return PinType;

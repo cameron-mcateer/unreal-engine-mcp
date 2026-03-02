@@ -32,10 +32,12 @@ public:
 
 private:
     /**
-     * Converts a type string to FEdGraphPinType
-     * Supported types: bool, int, float, string, vector, rotator
+     * Converts a type string to FEdGraphPinType.
+     * Primitives: bool, int, float, string, vector, rotator
+     * Objects: any class name without prefix ("Character", "Actor") or with prefix ("ACharacter")
+     * @param bOutSuccess - set to false if the type string could not be resolved
      */
-    static FEdGraphPinType GetPinTypeFromString(const FString& TypeString);
+    static FEdGraphPinType GetPinTypeFromString(const FString& TypeString, bool& bOutSuccess);
 
     /**
      * Sets the default value of a variable
