@@ -32,6 +32,12 @@ def add_node(
             - target_function (str): For CallFunction nodes, the function to call
             - target_blueprint (str): For CallFunction nodes, optional path to target Blueprint
             - function_name (str): Optional name of function graph to add node to (if None, uses EventGraph)
+            - operator (str): For MathOperator nodes, the operation to perform.
+                              Arithmetic: Add, Subtract, Multiply, Divide
+                              Comparison: Less, LessEqual, Greater, GreaterEqual, Equal, NotEqual
+                              Boolean:    BooleanAND, BooleanOR
+                              Vector:     NormalizeVector, VectorSubtract
+            - pin_type (str): For MathOperator nodes, optional initial pin type (float, int, vector)
 
     Returns:
         Dictionary containing:
@@ -260,5 +266,55 @@ def add_call_function_node(
         unreal_connection,
         blueprint_name,
         "CallFunction",
+        node_params
+    )
+
+
+def add_math_operator_node(
+    unreal_connection,
+    blueprint_name: str,
+    operator: str,
+    pos_x: float = 0,
+    pos_y: float = 0,
+    pin_type: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Add a Math Operator node (K2Node_PromotableOperator) to a Blueprint graph.
+
+    Args:
+        unreal_connection: Connection to Unreal Engine
+        blueprint_name: Name of the Blueprint
+        operator: The math operation to perform. Supported values:
+            Arithmetic: "Add", "Subtract", "Multiply", "Divide"
+            Comparison: "Less", "LessEqual", "Greater", "GreaterEqual",
+                        "Equal", "NotEqual"
+            Boolean:    "BooleanAND", "BooleanOR"
+            Vector:     "NormalizeVector", "VectorSubtract"
+        pos_x: X position in graph
+        pos_y: Y position in graph
+        pin_type: Optional initial pin type ("float", "int", "vector").
+                  VectorSubtract always uses vector; NormalizeVector ignores this.
+
+    Returns:
+        Dictionary containing node_id and status
+
+    Example:
+        >>> add_math_operator_node(unreal, "BP_Enemy", "Subtract", 200, 300)
+        >>> add_math_operator_node(unreal, "BP_Enemy", "LessEqual", 400, 300)
+        >>> add_math_operator_node(unreal, "BP_Enemy", "VectorSubtract", 100, 500)
+    """
+    node_params: Dict[str, Any] = {
+        "pos_x": pos_x,
+        "pos_y": pos_y,
+        "operator": operator
+    }
+
+    if pin_type:
+        node_params["pin_type"] = pin_type
+
+    return add_node(
+        unreal_connection,
+        blueprint_name,
+        "MathOperator",
         node_params
     )

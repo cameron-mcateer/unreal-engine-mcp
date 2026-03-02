@@ -2023,17 +2023,19 @@ def add_node(
     variable_name: str = "",
     target_function: str = "",
     target_blueprint: Optional[str] = None,
-    function_name: Optional[str] = None
+    function_name: Optional[str] = None,
+    operator: str = "",
+    pin_type: str = ""
 ) -> Dict[str, Any]:
     """
     Add a node to a Blueprint graph.
 
     Create various types of K2Nodes in a Blueprint's event graph or function graph.
-    Supports 23 node types organized by category.
+    Supports 24 node types organized by category.
 
     Args:
         blueprint_name: Name of the Blueprint to modify
-        node_type: Type of node to create. Supported types (23 total):
+        node_type: Type of node to create. Supported types (24 total):
 
             CONTROL FLOW:
                 "Branch" - Conditional execution (if/then/else)
@@ -2065,6 +2067,25 @@ def add_node(
                 "Select" - Choose between two inputs based on boolean condition
                 "SpawnActor" - Spawn actor from class (⚠️ class must derive from Actor)
 
+            MATH (K2Node_PromotableOperator – type-promotes automatically when wired):
+                "MathOperator" - Math/comparison operator node. Requires operator= parameter.
+                    Arithmetic : operator="Add"          pins: A, B → ReturnValue
+                                 operator="Subtract"     pins: A, B → ReturnValue
+                                 operator="Multiply"     pins: A, B → ReturnValue
+                                 operator="Divide"       pins: A, B → ReturnValue
+                    Comparison : operator="Less"          pins: A, B → ReturnValue (bool)
+                                 operator="LessEqual"    pins: A, B → ReturnValue (bool)
+                                 operator="Greater"      pins: A, B → ReturnValue (bool)
+                                 operator="GreaterEqual" pins: A, B → ReturnValue (bool)
+                                 operator="Equal"        pins: A, B → ReturnValue (bool)
+                                 operator="NotEqual"     pins: A, B → ReturnValue (bool)
+                    Boolean    : operator="BooleanAND"   pins: A, B → ReturnValue (bool)
+                                 operator="BooleanOR"    pins: A, B → ReturnValue (bool)
+                    Vector     : operator="NormalizeVector" pin: A (vector) → ReturnValue (vector)
+                                 operator="VectorSubtract"  pins: A, B (vector) → ReturnValue (vector)
+                    ℹ️ Use pin_type= to hint the initial type (float, int, vector).
+                       The node auto-promotes when you connect typed wires.
+
             SPECIALIZED:
                 "Timeline" - Animation timeline playback with curve tracks
                     ⚠️ REQUIRES MANUAL IMPLEMENTATION: Animation curves must be added in editor
@@ -2085,6 +2106,10 @@ def add_node(
         target_function: For CallFunction nodes, the function to call
         target_blueprint: For CallFunction nodes, optional path to target Blueprint
         function_name: Optional name of function graph to add node to (if None, uses EventGraph)
+        operator: For MathOperator nodes, the operation (Add, Subtract, Multiply, Divide,
+                  Less, LessEqual, Greater, GreaterEqual, Equal, NotEqual,
+                  BooleanAND, BooleanOR, NormalizeVector, VectorSubtract)
+        pin_type: For MathOperator nodes, optional initial pin type (float, int, vector)
 
     Returns:
         Dictionary with success status, node_id, and position
@@ -2093,6 +2118,7 @@ def add_node(
         - Most nodes can have pins modified after creation via set_node_property
         - Dynamic pin management: Switch/SwitchEnum/ExecutionSequence/MakeArray support pin operations
         - Timeline is the ONLY node requiring manual implementation (curves must be added in editor)
+        - MathOperator nodes use K2Node_PromotableOperator and auto-promote pin types when wired
     """
     unreal = get_unreal_connection()
     if not unreal:
@@ -2116,6 +2142,10 @@ def add_node(
             node_params["target_blueprint"] = target_blueprint
         if function_name:
             node_params["function_name"] = function_name
+        if operator:
+            node_params["operator"] = operator
+        if pin_type:
+            node_params["pin_type"] = pin_type
 
         result = node_manager.add_node(
             unreal,
@@ -2182,6 +2212,7 @@ def create_variable(
     variable_type: str,
     default_value: Any = None,
     is_public: bool = False,
+    is_blueprint_writable: bool = True,
     tooltip: str = "",
     category: str = "Default"
 ) -> Dict[str, Any]:
@@ -2193,14 +2224,35 @@ def create_variable(
     Args:
         blueprint_name: Name of the Blueprint to modify
         variable_name: Name of the variable to create
-        variable_type: Type of the variable ("bool", "int", "float", "string", "vector", "rotator")
-        default_value: Default value for the variable (optional)
+        variable_type: Type of the variable. Supported types:
+            - "bool" - Boolean (True/False)
+            - "int" - Integer number
+            - "float" - Floating point number
+            - "string" - Text string
+            - "vector" - 3D vector [x, y, z]
+            - "rotator" - 3D rotation [pitch, yaw, roll]
+        default_value: Default value matching the variable_type:
+            - bool: True or False
+            - int: any integer (e.g., 0, 100, -5)
+            - float: any decimal (e.g., 0.0, 10.5, -3.14)
+            - string: any text (e.g., "", "Hello")
+            - vector: list of 3 floats (e.g., [0.0, 0.0, 0.0])
+            - rotator: list of 3 floats (e.g., [0.0, 90.0, 0.0])
         is_public: Whether the variable should be public/editable (default: False)
+        is_blueprint_writable: Whether the variable can be set in Blueprint (default: True)
+            Set to True (default) to allow VariableSet nodes to modify this variable.
+            Set to False only for read-only/constant variables.
+            If you plan to create VariableSet nodes for this variable, keep this True.
         tooltip: Tooltip text for the variable (optional)
         category: Category for organizing variables (default: "Default")
 
     Returns:
         Dictionary with success status and variable details
+
+    Examples:
+        - Create health variable: create_variable("BP_Player", "Health", "float", 100.0)
+        - Create alive flag: create_variable("BP_Enemy", "IsAlive", "bool", True, is_public=True)
+        - Create spawn point: create_variable("BP_Actor", "SpawnPos", "vector", [0.0, 0.0, 100.0])
     """
     unreal = get_unreal_connection()
     if not unreal:
@@ -2214,6 +2266,7 @@ def create_variable(
             variable_type,
             default_value,
             is_public,
+            is_blueprint_writable,
             tooltip,
             category
         )
