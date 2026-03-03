@@ -315,20 +315,41 @@ UK2Node_Event* FBlueprintNodeManager::CreateEventNode(UEdGraph* Graph, const TSh
 		return nullptr;
 	}
 
-	if (EventType.Equals(TEXT("BeginPlay"), ESearchCase::IgnoreCase))
+	// Dynamically resolve event_type against the Blueprint's parent class hierarchy.
+	// Two candidate function names are tried in order:
+	//   1. Exact match:            event_type as-is           (e.g. "ReceiveAnyDamage")
+	//   2. "Receive" + event_type  short alias form            (e.g. "AnyDamage" -> "ReceiveAnyDamage")
+	// Only functions flagged FUNC_BlueprintEvent are accepted so that
+	// SetFromField<UFunction> + AllocateDefaultPins generates all parameter output pins.
+	bool bBound = false;
+	UBlueprint* BP = Graph->GetTypedOuter<UBlueprint>();
+	if (BP && BP->ParentClass)
 	{
-		// Use direct function name - ReceiveBeginPlay is protected
-		EventNode->EventReference.SetExternalDelegateMember(FName(TEXT("ReceiveBeginPlay")));
-		EventNode->bOverrideFunction = true;
+		TArray<FName> Candidates;
+		Candidates.Add(FName(*EventType));
+		if (!EventType.StartsWith(TEXT("Receive"), ESearchCase::IgnoreCase))
+		{
+			Candidates.Add(FName(*(TEXT("Receive") + EventType)));
+		}
+
+		for (const FName& CandidateName : Candidates)
+		{
+			UFunction* FoundFn = BP->ParentClass->FindFunctionByName(CandidateName, EIncludeSuperFlag::IncludeSuper);
+			if (FoundFn && FoundFn->HasAnyFunctionFlags(FUNC_BlueprintEvent))
+			{
+				// SetFromField stores the owning class + GUID so ResolveMember<UFunction>
+				// (called inside AllocateDefaultPins) can find the function and build pins.
+				EventNode->EventReference.SetFromField<UFunction>(FoundFn, false);
+				EventNode->bOverrideFunction = true;
+				bBound = true;
+				break;
+			}
+		}
 	}
-	else if (EventType.Equals(TEXT("Tick"), ESearchCase::IgnoreCase))
+
+	if (!bBound)
 	{
-		// Use direct function name - ReceiveTick is protected
-		EventNode->EventReference.SetExternalDelegateMember(FName(TEXT("ReceiveTick")));
-		EventNode->bOverrideFunction = true;
-	}
-	else
-	{
+		// Fall back to a custom event using the raw name.
 		EventNode->CustomFunctionName = FName(*EventType);
 	}
 

@@ -821,11 +821,48 @@ def get_blueprint_function_details(
         
         response = unreal.send_command("get_blueprint_function_details", params)
         return response or {"success": False, "message": "No response from Unreal"}
-        
+
     except Exception as e:
         logger.error(f"get_blueprint_function_details error: {e}")
         return {"success": False, "message": str(e)}
 
+
+@mcp.tool()
+def get_blueprint_events(
+    blueprint_name: str
+) -> Dict[str, Any]:
+    """
+    List all Blueprint events available on a Blueprint's class and its full parent class hierarchy.
+
+    Returns every BlueprintImplementableEvent and BlueprintNativeEvent that can be
+    added as an event node via add_node(node_type="Event"), together with the output
+    pins each event exposes.  Call this before add_node to discover valid event_type
+    values and the pins they will produce.
+
+    Args:
+        blueprint_name: Name or path of the Blueprint
+                        (e.g. "BP_Enemy" or "/Game/Blueprints/BP_Enemy")
+
+    Returns:
+        Dictionary with:
+          - events (list): each entry contains
+              function_name (str)  – exact UFunction name, e.g. "ReceiveAnyDamage"
+              event_type   (str)  – short alias accepted by add_node, e.g. "AnyDamage"
+              defining_class (str) – class that declares the event, e.g. "Actor"
+              pins (list)         – output pins: [{ name, type, sub_type (optional) }]
+          - count (int): total number of events found
+    """
+    unreal = get_unreal_connection()
+    if not unreal:
+        return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+    try:
+        response = unreal.send_command("get_blueprint_available_events", {"blueprint_name": blueprint_name})
+        return response or {"success": False, "message": "No response from Unreal"}
+
+    except Exception as e:
+        logger.error(f"get_blueprint_events error: {e}")
+        return {"success": False, "message": str(e)}
 
 
 # Advanced Composition Tools
@@ -2099,13 +2136,23 @@ def add_node(
                 "Knot" - Invisible reroute node (wire organization only)
 
             EVENT:
-                "Event" - Blueprint event (specify event_type: BeginPlay, Tick, etc.)
+                "Event" - Blueprint event node that fires when the named event occurs.
+                    event_type accepts the short alias (e.g. "AnyDamage", "BeginPlay",
+                    "Tick", "Destroyed", "ActorBeginOverlap", "ActorEndOverlap") or the
+                    full UFunction name (e.g. "ReceiveAnyDamage").  The node exposes all
+                    parameter output pins defined by the event's signature.
+                    ℹ️ Use get_blueprint_events(blueprint_name) to discover every event
+                       available on the Blueprint's class hierarchy and its output pins.
                     ℹ️ Tick events run every frame - be mindful of performance impact
 
         pos_x: X position in graph (default: 0)
         pos_y: Y position in graph (default: 0)
         message: For Print nodes, the text to print
-        event_type: For Event nodes, the event name (BeginPlay, Tick, Destroyed, etc.)
+        event_type: For Event nodes, the event name.  Accepts the short alias
+                    (e.g. "AnyDamage", "BeginPlay", "Tick", "Destroyed",
+                    "ActorBeginOverlap", "ActorEndOverlap") or the full UFunction name
+                    (e.g. "ReceiveAnyDamage").  Use get_blueprint_events() to discover
+                    all available events and their output pins for the target Blueprint.
         variable_name: For Variable nodes, the variable name
         target_function: For CallFunction nodes, the function to call
         target_blueprint: For CallFunction nodes, optional path to target Blueprint

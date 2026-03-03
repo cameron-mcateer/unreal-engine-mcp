@@ -101,6 +101,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleCommand(const FSt
     {
         return HandleGetBlueprintFunctionDetails(Params);
     }
+    else if (CommandType == TEXT("get_blueprint_available_events"))
+    {
+        return HandleGetBlueprintAvailableEvents(Params);
+    }
 
     return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown blueprint command: %s"), *CommandType));
 }
@@ -1648,4 +1652,98 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetBlueprintFunct
 
     ResultObj->SetBoolField(TEXT("success"), true);
     return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetBlueprintAvailableEvents(const TSharedPtr<FJsonObject>& Params)
+{
+    // Accept either blueprint_path or blueprint_name
+    FString BlueprintPath;
+    if (!Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath))
+    {
+        FString BlueprintName;
+        if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+        {
+            return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_path' or 'blueprint_name' parameter"));
+        }
+        BlueprintPath = BlueprintName.StartsWith(TEXT("/")) ? BlueprintName : (TEXT("/Game/Blueprints/") + BlueprintName);
+    }
+
+    UBlueprint* Blueprint = Cast<UBlueprint>(UEditorAssetLibrary::LoadAsset(BlueprintPath));
+    if (!Blueprint)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load blueprint: %s"), *BlueprintPath));
+    }
+
+    const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+    TArray<TSharedPtr<FJsonValue>> EventArray;
+
+    // Walk the full parent class hierarchy, collecting every BlueprintImplementableEvent
+    // and BlueprintNativeEvent (FUNC_BlueprintEvent) declared at each level.
+    UClass* CurrentClass = Blueprint->ParentClass;
+    while (CurrentClass && CurrentClass != UObject::StaticClass())
+    {
+        for (TFieldIterator<UFunction> FuncIt(CurrentClass, EFieldIteratorFlags::ExcludeSuper); FuncIt; ++FuncIt)
+        {
+            UFunction* Func = *FuncIt;
+            if (!Func->HasAnyFunctionFlags(FUNC_BlueprintEvent))
+            {
+                continue;
+            }
+
+            TSharedPtr<FJsonObject> EventObj = MakeShared<FJsonObject>();
+            FString FuncName = Func->GetName();
+            EventObj->SetStringField(TEXT("function_name"), FuncName);
+            EventObj->SetStringField(TEXT("defining_class"), CurrentClass->GetName());
+
+            // Short alias: strip leading "Receive" so callers can pass either form to add_node
+            FString EventTypeName = FuncName;
+            if (EventTypeName.StartsWith(TEXT("Receive")))
+            {
+                EventTypeName = EventTypeName.Mid(7);
+            }
+            EventObj->SetStringField(TEXT("event_type"), EventTypeName);
+
+            // Collect parameter output pins from the function signature
+            TArray<TSharedPtr<FJsonValue>> PinArray;
+            for (TFieldIterator<FProperty> PropIt(Func); PropIt && (PropIt->PropertyFlags & CPF_Parm); ++PropIt)
+            {
+                FProperty* Prop = *PropIt;
+                if (Prop->HasAnyPropertyFlags(CPF_ReturnParm))
+                {
+                    continue;
+                }
+
+                TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
+                PinObj->SetStringField(TEXT("name"), Prop->GetName());
+
+                FEdGraphPinType PinType;
+                if (K2Schema->ConvertPropertyToPinType(Prop, PinType))
+                {
+                    PinObj->SetStringField(TEXT("type"), PinType.PinCategory.ToString());
+                    if (PinType.PinSubCategoryObject.IsValid())
+                    {
+                        PinObj->SetStringField(TEXT("sub_type"), PinType.PinSubCategoryObject->GetName());
+                    }
+                }
+                else
+                {
+                    PinObj->SetStringField(TEXT("type"), Prop->GetClass()->GetName());
+                }
+
+                PinArray.Add(MakeShared<FJsonValueObject>(PinObj));
+            }
+            EventObj->SetArrayField(TEXT("pins"), PinArray);
+
+            EventArray.Add(MakeShared<FJsonValueObject>(EventObj));
+        }
+
+        CurrentClass = CurrentClass->GetSuperClass();
+    }
+
+    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+    Result->SetBoolField(TEXT("success"), true);
+    Result->SetArrayField(TEXT("events"), EventArray);
+    Result->SetNumberField(TEXT("count"), EventArray.Num());
+    Result->SetStringField(TEXT("blueprint_path"), BlueprintPath);
+    return Result;
 }
