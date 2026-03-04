@@ -2062,7 +2062,8 @@ def add_node(
     target_blueprint: Optional[str] = None,
     function_name: Optional[str] = None,
     operator: str = "",
-    pin_type: str = ""
+    pin_type: str = "",
+    target_class: str = ""
 ) -> Dict[str, Any]:
     """
     Add a node to a Blueprint graph.
@@ -2094,8 +2095,8 @@ def add_node(
                     ℹ️ Creates 1 pin at creation; add/remove via set_node_property with action="set_num_elements"
 
             CASTING:
-                "DynamicCast" - Cast object to specific class (⚠️ handle "Cast Failed" output)
-                "ClassDynamicCast" - Cast class reference to derived class (⚠️ handle failure cases)
+                "DynamicCast" - Cast object to specific class (⚠️ requires target_class; handle "Cast Failed" output)
+                "ClassDynamicCast" - Cast class reference to derived class (⚠️ requires target_class; handle failure cases)
                 "CastByteToEnum" - Convert byte value to enum (⚠️ byte must be valid enum range)
 
             UTILITY:
@@ -2161,6 +2162,10 @@ def add_node(
                   Less, LessEqual, Greater, GreaterEqual, Equal, NotEqual,
                   BooleanAND, BooleanOR, NormalizeVector, VectorSubtract)
         pin_type: For MathOperator nodes, optional initial pin type (float, int, vector)
+        target_class: For DynamicCast/ClassDynamicCast nodes, the target class path
+                      (e.g. "/Game/Blueprints/BP_Foo.BP_Foo_C" or "ACharacter_C").
+                      Required for DynamicCast and ClassDynamicCast — omitting it
+                      creates a non-functional wildcard cast node.
 
     Returns:
         Dictionary with success status, node_id, and position
@@ -2171,6 +2176,9 @@ def add_node(
         - Timeline is the ONLY node requiring manual implementation (curves must be added in editor)
         - MathOperator nodes use K2Node_PromotableOperator and auto-promote pin types when wired
     """
+    if node_type in ("DynamicCast", "ClassDynamicCast") and not target_class:
+        return {"success": False, "error": f"{node_type} requires target_class"}
+
     unreal = get_unreal_connection()
     if not unreal:
         return {"success": False, "message": "Failed to connect to Unreal Engine"}
@@ -2197,6 +2205,8 @@ def add_node(
             node_params["operator"] = operator
         if pin_type:
             node_params["pin_type"] = pin_type
+        if target_class:
+            node_params["target_class"] = target_class
 
         result = node_manager.add_node(
             unreal,

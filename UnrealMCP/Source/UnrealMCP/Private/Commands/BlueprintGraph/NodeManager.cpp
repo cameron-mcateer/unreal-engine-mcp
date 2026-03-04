@@ -230,6 +230,11 @@ TSharedPtr<FJsonObject> FBlueprintNodeManager::AddNode(const TSharedPtr<FJsonObj
 
 	if (!NewNode)
 	{
+		FString TargetClass;
+		if (NodeParams->TryGetStringField(TEXT("target_class"), TargetClass) && !TargetClass.IsEmpty())
+		{
+			return CreateErrorResponse(FString::Printf(TEXT("Could not resolve target class '%s' for %s node"), *TargetClass, *NodeType));
+		}
 		return CreateErrorResponse(FString::Printf(TEXT("Failed to create %s node"), *NodeType));
 	}
 

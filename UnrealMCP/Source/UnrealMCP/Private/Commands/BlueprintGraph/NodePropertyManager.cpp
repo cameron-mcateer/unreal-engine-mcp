@@ -228,6 +228,29 @@ TSharedPtr<FJsonObject> FNodePropertyManager::EditNode(const TSharedPtr<FJsonObj
 	return DispatchEditAction(K2Node, Graph, Action, Params);
 }
 
+static UClass* ResolveCastTargetClass(const FString& Name)
+{
+	// Try direct find (works if already loaded, full path or _C suffix)
+	UClass* Found = FindObject<UClass>(nullptr, *Name);
+	if (Found) return Found;
+
+	// Try appending _C (Blueprint generated class suffix)
+	Found = FindObject<UClass>(nullptr, *(Name + TEXT("_C")));
+	if (Found) return Found;
+
+	// Try loading as a Blueprint asset, then get GeneratedClass
+	// Handles paths like "/Game/Blueprints/BP_Foo.BP_Foo_C" — strip _C to get asset path
+	FString AssetPath = Name;
+	if (AssetPath.EndsWith(TEXT("_C")))
+	{
+		AssetPath = AssetPath.LeftChop(2);
+	}
+	UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *AssetPath);
+	if (BP && BP->GeneratedClass) return BP->GeneratedClass;
+
+	return nullptr;
+}
+
 TSharedPtr<FJsonObject> FNodePropertyManager::DispatchEditAction(
 	UK2Node* Node,
 	UEdGraph* Graph,
@@ -343,6 +366,43 @@ TSharedPtr<FJsonObject> FNodePropertyManager::DispatchEditAction(
 		{
 			return CreateErrorResponse(FString::Printf(TEXT("Failed to set array elements to %d"), NumElements));
 		}
+	}
+
+	// === DYNAMICCAST / CLASSDYNAMICCAST: Set target type ===
+	if (Action.Equals(TEXT("set_cast_target"), ESearchCase::IgnoreCase))
+	{
+		FString TargetType;
+		if (!Params->TryGetStringField(TEXT("target_type"), TargetType) || TargetType.IsEmpty())
+		{
+			return CreateErrorResponse(TEXT("set_cast_target requires 'target_type' parameter"));
+		}
+
+		UK2Node_DynamicCast* CastNode = Cast<UK2Node_DynamicCast>(Node);
+		if (!CastNode)
+		{
+			return CreateErrorResponse(TEXT("Node is not a DynamicCast node"));
+		}
+
+		UClass* TargetClass = ResolveCastTargetClass(TargetType);
+		if (!TargetClass)
+		{
+			return CreateErrorResponse(FString::Printf(TEXT("Could not resolve class: %s"), *TargetType));
+		}
+
+		CastNode->TargetType = TargetClass;
+		CastNode->ReconstructNode();
+		Graph->NotifyGraphChanged();
+		UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForGraph(Graph);
+		if (Blueprint)
+		{
+			FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+		}
+
+		TSharedPtr<FJsonObject> Response = MakeShareable(new FJsonObject);
+		Response->SetBoolField(TEXT("success"), true);
+		Response->SetStringField(TEXT("action"), TEXT("set_cast_target"));
+		Response->SetStringField(TEXT("target_type"), TargetType);
+		return Response;
 	}
 
 	// Unknown action

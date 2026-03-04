@@ -4,6 +4,26 @@
 #include "K2Node_CastByteToEnum.h"
 #include "K2Node_ClassDynamicCast.h"
 #include "K2Node_DynamicCast.h"
+#include "Engine/Blueprint.h"
+
+static UClass* ResolveCastTargetClass(const FString& Name)
+{
+  UClass* Found = FindObject<UClass>(nullptr, *Name);
+  if (Found) return Found;
+
+  Found = FindObject<UClass>(nullptr, *(Name + TEXT("_C")));
+  if (Found) return Found;
+
+  FString AssetPath = Name;
+  if (AssetPath.EndsWith(TEXT("_C")))
+  {
+    AssetPath = AssetPath.LeftChop(2);
+  }
+  UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *AssetPath);
+  if (BP && BP->GeneratedClass) return BP->GeneratedClass;
+
+  return nullptr;
+}
 
 
 UK2Node *FCastingNodeCreator::CreateDynamicCastNode(
@@ -19,12 +39,12 @@ UK2Node *FCastingNodeCreator::CreateDynamicCastNode(
 
   // Set target class BEFORE initialization
   FString TargetClass;
-  if (Params->TryGetStringField(TEXT("target_class"), TargetClass)) {
-    UClass *CastClass = Cast<UClass>(
-        StaticFindObject(UClass::StaticClass(), nullptr, *TargetClass));
-    if (CastClass) {
-      DynamicCastNode->TargetType = CastClass;
+  if (Params->TryGetStringField(TEXT("target_class"), TargetClass) && !TargetClass.IsEmpty()) {
+    UClass *CastClass = ResolveCastTargetClass(TargetClass);
+    if (!CastClass) {
+      return nullptr; // caller will report target_class not found
     }
+    DynamicCastNode->TargetType = CastClass;
   }
 
   double PosX, PosY;
@@ -53,8 +73,7 @@ UK2Node *FCastingNodeCreator::CreateClassDynamicCastNode(
   // Set target class BEFORE initialization
   FString TargetClass;
   if (Params->TryGetStringField(TEXT("target_class"), TargetClass)) {
-    UClass *CastClass = Cast<UClass>(
-        StaticFindObject(UClass::StaticClass(), nullptr, *TargetClass));
+    UClass *CastClass = ResolveCastTargetClass(TargetClass);
     if (CastClass) {
       ClassDynamicCastNode->TargetType = CastClass;
     }
