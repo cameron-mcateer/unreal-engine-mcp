@@ -2156,7 +2156,11 @@ def add_node(
                     all available events and their output pins for the target Blueprint.
         variable_name: For Variable nodes, the variable name
         target_function: For CallFunction nodes, the function to call
-        target_blueprint: For CallFunction nodes, optional path to target Blueprint
+        target_blueprint: For CallFunction nodes, the class or Blueprint that owns the function.
+                          Accepts Blueprint asset paths ("/Game/Blueprints/BP_Foo"),
+                          native C++ class short names ("RRInventoryComponent"),
+                          or full script paths ("/Script/RiftRunners.RRInventoryComponent").
+                          If omitted, searches UKismetSystemLibrary.
         function_name: Optional name of function graph to add node to (if None, uses EventGraph)
         operator: For MathOperator nodes, the operation (Add, Subtract, Multiply, Divide,
                   Less, LessEqual, Greater, GreaterEqual, Equal, NotEqual,

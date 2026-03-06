@@ -8,7 +8,60 @@
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
+#include "Engine/Blueprint.h"
 #include "Json.h"
+
+/**
+ * Resolve a class name to a UClass*.
+ * Supports: Blueprint asset paths (/Game/...), full script paths (/Script/...),
+ * short native class names (e.g. "URRInventoryComponent" or "RRInventoryComponent"),
+ * and paths with _C suffix.
+ */
+static UClass* ResolveTargetClass(const FString& Name)
+{
+	if (Name.IsEmpty())
+	{
+		return nullptr;
+	}
+
+	// 1. Try loading as a Blueprint asset (existing behaviour for /Game/ paths)
+	if (UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *Name))
+	{
+		return BP->GeneratedClass;
+	}
+
+	// 2. Try with _C suffix for Blueprint generated classes
+	if (!Name.EndsWith(TEXT("_C")))
+	{
+		if (UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *(Name + TEXT("_C"))))
+		{
+			return BP->GeneratedClass;
+		}
+	}
+
+	// 3. Try as native class via FindFirstObject (handles short names and /Script/ paths)
+	if (UClass* NativeClass = FindFirstObject<UClass>(*Name,
+		EFindFirstObjectOptions::NativeFirst | EFindFirstObjectOptions::EnsureIfAmbiguous))
+	{
+		return NativeClass;
+	}
+
+	// 4. Strip any path prefix and retry with just the class name
+	FString ClassName = Name;
+	int32 DotIdx;
+	if (ClassName.FindLastChar(TEXT('.'), DotIdx))
+	{
+		ClassName = ClassName.Mid(DotIdx + 1);
+		if (UClass* NativeClass = FindFirstObject<UClass>(*ClassName,
+			EFindFirstObjectOptions::NativeFirst | EFindFirstObjectOptions::EnsureIfAmbiguous))
+		{
+			return NativeClass;
+		}
+	}
+
+	// 5. Legacy fallback: StaticFindObject (for fully qualified paths already loaded)
+	return Cast<UClass>(StaticFindObject(UClass::StaticClass(), nullptr, *Name));
+}
 
 UK2Node* FUtilityNodeCreator::CreatePrintNode(UEdGraph* Graph, const TSharedPtr<FJsonObject>& Params)
 {
@@ -80,9 +133,15 @@ UK2Node* FUtilityNodeCreator::CreateCallFunctionNode(UEdGraph* Graph, const TSha
 	// Find the function to call
 	UFunction* TargetFunc = nullptr;
 	FString ClassName;
-	if (Params->TryGetStringField(TEXT("target_class"), ClassName))
+	// Accept both "target_class" and "target_blueprint" as the class/Blueprint identifier
+	if (!Params->TryGetStringField(TEXT("target_class"), ClassName) || ClassName.IsEmpty())
 	{
-		UClass* TargetClass = Cast<UClass>(StaticFindObject(UClass::StaticClass(), nullptr, *ClassName));
+		Params->TryGetStringField(TEXT("target_blueprint"), ClassName);
+	}
+
+	if (!ClassName.IsEmpty())
+	{
+		UClass* TargetClass = ResolveTargetClass(ClassName);
 		if (TargetClass)
 		{
 			TargetFunc = TargetClass->FindFunctionByName(FName(*TargetFunction));

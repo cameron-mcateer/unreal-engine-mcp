@@ -237,7 +237,7 @@ def add_call_function_node(
     target_blueprint: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Add a Call Function node to call a Blueprint function.
+    Add a Call Function node to call a Blueprint function or native C++ class function.
 
     Args:
         unreal_connection: Connection to Unreal Engine
@@ -245,13 +245,19 @@ def add_call_function_node(
         target_function: Name of the function to call
         pos_x: X position in graph
         pos_y: Y position in graph
-        target_blueprint: Optional path to target Blueprint (defaults to same blueprint)
+        target_blueprint: Optional class or Blueprint identifier. Accepts:
+            - Blueprint asset path: "/Game/Blueprints/BP_Foo"
+            - Native class short name: "RRInventoryComponent"
+            - Full script path: "/Script/RiftRunners.RRInventoryComponent"
+            If omitted, searches UKismetSystemLibrary.
 
     Returns:
         Dictionary containing node_id and status
 
     Example:
         >>> add_call_function_node(unreal, "MyActor", "MyFunction", 400, 0)
+        >>> add_call_function_node(unreal, "MyActor", "AddItem", 400, 0,
+        ...     target_blueprint="RRInventoryComponent")
     """
     node_params = {
         "pos_x": pos_x,
