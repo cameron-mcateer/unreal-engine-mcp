@@ -19,6 +19,7 @@
 #include "Engine/Engine.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Kismet2/CompilerResultsLog.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
 #include "UObject/Field.h"
@@ -394,12 +395,42 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleCompileBlueprint(
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
     }
 
-    // Compile the blueprint
-    FKismetEditorUtilities::CompileBlueprint(Blueprint);
+    // Compile the blueprint, capturing compiler messages
+    FCompilerResultsLog CompileResults;
+    FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::None, &CompileResults);
+
+    // Collect errors and warnings from compiler results
+    TArray<TSharedPtr<FJsonValue>> ErrorArray;
+    TArray<TSharedPtr<FJsonValue>> WarningArray;
+
+    for (const TSharedRef<FTokenizedMessage>& Message : CompileResults.Messages)
+    {
+        EMessageSeverity::Type Severity = Message->GetSeverity();
+        FString MessageText = Message->ToText().ToString();
+
+        if (Severity == EMessageSeverity::Error || Severity == EMessageSeverity::CriticalError)
+        {
+            ErrorArray.Add(MakeShared<FJsonValueString>(MessageText));
+        }
+        else if (Severity == EMessageSeverity::Warning || Severity == EMessageSeverity::PerformanceWarning)
+        {
+            WarningArray.Add(MakeShared<FJsonValueString>(MessageText));
+        }
+    }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("name"), BlueprintName);
-    ResultObj->SetBoolField(TEXT("compiled"), true);
+    ResultObj->SetBoolField(TEXT("compiled"), ErrorArray.Num() == 0);
+
+    if (ErrorArray.Num() > 0)
+    {
+        ResultObj->SetArrayField(TEXT("errors"), ErrorArray);
+    }
+    if (WarningArray.Num() > 0)
+    {
+        ResultObj->SetArrayField(TEXT("warnings"), WarningArray);
+    }
+
     return ResultObj;
 }
 

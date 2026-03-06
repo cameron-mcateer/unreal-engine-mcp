@@ -625,15 +625,48 @@ def set_physics_properties(
 
 @mcp.tool()
 def compile_blueprint(blueprint_name: str) -> Dict[str, Any]:
-    """Compile a Blueprint."""
+    """Compile a Blueprint.
+
+    Returns compiled status along with any compiler errors or warnings.
+    If the Blueprint compiles with errors, this tool returns a failure with
+    the error messages so the caller can diagnose and fix them.
+
+    Args:
+        blueprint_name: Name of the Blueprint to compile.
+
+    Returns:
+        On success: {"compiled": true, "warnings": [...]}
+        On failure: {"compiled": false, "errors": [...], "warnings": [...]}
+    """
     unreal = get_unreal_connection()
     if not unreal:
         return {"success": False, "message": "Failed to connect to Unreal Engine"}
-    
+
     try:
         params = {"blueprint_name": blueprint_name}
         response = unreal.send_command("compile_blueprint", params)
-        return response or {"success": False, "message": "No response from Unreal"}
+        if not response:
+            return {"success": False, "message": "No response from Unreal"}
+
+        # Extract compilation result from the response
+        result = response.get("result", response)
+        compiled = result.get("compiled", False)
+        errors = result.get("errors", [])
+        warnings = result.get("warnings", [])
+
+        if not compiled and errors:
+            return {
+                "success": False,
+                "compiled": False,
+                "errors": errors,
+                "warnings": warnings,
+                "message": f"Blueprint '{blueprint_name}' compiled with {len(errors)} error(s). See 'errors' field for details.",
+            }
+
+        ret = {"success": True, "compiled": True, "name": result.get("name", blueprint_name)}
+        if warnings:
+            ret["warnings"] = warnings
+        return ret
     except Exception as e:
         logger.error(f"compile_blueprint error: {e}")
         return {"success": False, "message": str(e)}
