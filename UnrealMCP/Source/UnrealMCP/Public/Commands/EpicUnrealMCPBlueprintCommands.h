@@ -38,5 +38,8 @@ private:
     TSharedPtr<FJsonObject> HandleGetBlueprintFunctionDetails(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleGetBlueprintAvailableEvents(const TSharedPtr<FJsonObject>& Params);
 
+    // Reparenting
+    TSharedPtr<FJsonObject> HandleReparentBlueprint(const TSharedPtr<FJsonObject>& Params);
+
 
 }; 

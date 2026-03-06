@@ -27,6 +27,7 @@
 #include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -105,6 +106,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleCommand(const FSt
     else if (CommandType == TEXT("get_blueprint_available_events"))
     {
         return HandleGetBlueprintAvailableEvents(Params);
+    }
+    else if (CommandType == TEXT("reparent_blueprint"))
+    {
+        return HandleReparentBlueprint(Params);
     }
 
     return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown blueprint command: %s"), *CommandType));
@@ -408,7 +413,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleCompileBlueprint(
         EMessageSeverity::Type Severity = Message->GetSeverity();
         FString MessageText = Message->ToText().ToString();
 
-        if (Severity == EMessageSeverity::Error || Severity == EMessageSeverity::CriticalError)
+        if (Severity == EMessageSeverity::Error)
         {
             ErrorArray.Add(MakeShared<FJsonValueString>(MessageText));
         }
@@ -420,6 +425,145 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleCompileBlueprint(
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("name"), BlueprintName);
+    ResultObj->SetBoolField(TEXT("compiled"), ErrorArray.Num() == 0);
+
+    if (ErrorArray.Num() > 0)
+    {
+        ResultObj->SetArrayField(TEXT("errors"), ErrorArray);
+    }
+    if (WarningArray.Num() > 0)
+    {
+        ResultObj->SetArrayField(TEXT("warnings"), WarningArray);
+    }
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleReparentBlueprint(const TSharedPtr<FJsonObject>& Params)
+{
+    // Get required parameters
+    FString BlueprintName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_name' parameter"));
+    }
+
+    FString NewParentClass;
+    if (!Params->TryGetStringField(TEXT("new_parent_class"), NewParentClass))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'new_parent_class' parameter"));
+    }
+
+    // Find the blueprint
+    UBlueprint* Blueprint = FEpicUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    if (!Blueprint)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+    }
+
+    // Record old parent class name
+    FString OldParentName = Blueprint->ParentClass ? Blueprint->ParentClass->GetName() : TEXT("None");
+
+    // Resolve the new parent class
+    UClass* ResolvedParentClass = nullptr;
+
+    // If it looks like an asset path, try loading as a Blueprint parent
+    if (NewParentClass.StartsWith(TEXT("/")))
+    {
+        // Try loading as a Blueprint asset first
+        FString AssetName = FPaths::GetBaseFilename(NewParentClass);
+        FString ObjectPath = FString::Printf(TEXT("%s.%s"), *NewParentClass, *AssetName);
+        UBlueprint* ParentBlueprint = LoadObject<UBlueprint>(nullptr, *ObjectPath);
+        if (ParentBlueprint && ParentBlueprint->GeneratedClass)
+        {
+            ResolvedParentClass = ParentBlueprint->GeneratedClass;
+        }
+        else
+        {
+            // Try loading as a native class path
+            ResolvedParentClass = LoadClass<UObject>(nullptr, *NewParentClass);
+        }
+    }
+    else
+    {
+        // Short name — try common native classes
+        FString ClassName = NewParentClass;
+        if (!ClassName.StartsWith(TEXT("A")))
+        {
+            ClassName = TEXT("A") + ClassName;
+        }
+
+        if (ClassName == TEXT("AActor"))
+        {
+            ResolvedParentClass = AActor::StaticClass();
+        }
+        else if (ClassName == TEXT("APawn"))
+        {
+            ResolvedParentClass = APawn::StaticClass();
+        }
+        else if (ClassName == TEXT("ACharacter"))
+        {
+            ResolvedParentClass = ACharacter::StaticClass();
+        }
+        else
+        {
+            // Try /Script/Engine path
+            const FString EnginePath = FString::Printf(TEXT("/Script/Engine.%s"), *ClassName);
+            ResolvedParentClass = LoadClass<UObject>(nullptr, *EnginePath);
+
+            if (!ResolvedParentClass)
+            {
+                // Try /Script/Game path (project classes)
+                const FString GamePath = FString::Printf(TEXT("/Script/Game.%s"), *ClassName);
+                ResolvedParentClass = LoadClass<UObject>(nullptr, *GamePath);
+            }
+        }
+    }
+
+    if (!ResolvedParentClass)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Class '%s' could not be resolved"), *NewParentClass));
+    }
+
+    // Perform the reparent (mirrors UBlueprintEditorLibrary::ReparentBlueprint
+    // but uses our own compile call so we can capture compiler messages)
+    Blueprint->ParentClass = ResolvedParentClass;
+
+    if (Blueprint->SimpleConstructionScript != nullptr)
+    {
+        Blueprint->SimpleConstructionScript->ValidateSceneRootNodes();
+    }
+
+    FBlueprintEditorUtils::RefreshAllNodes(Blueprint);
+    FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+
+    // Compile the blueprint and capture results
+    FCompilerResultsLog CompileResults;
+    FKismetEditorUtilities::CompileBlueprint(Blueprint, EBlueprintCompileOptions::SkipSave, &CompileResults);
+
+    // Collect errors and warnings
+    TArray<TSharedPtr<FJsonValue>> ErrorArray;
+    TArray<TSharedPtr<FJsonValue>> WarningArray;
+
+    for (const TSharedRef<FTokenizedMessage>& Message : CompileResults.Messages)
+    {
+        EMessageSeverity::Type Severity = Message->GetSeverity();
+        FString MessageText = Message->ToText().ToString();
+
+        if (Severity == EMessageSeverity::Error)
+        {
+            ErrorArray.Add(MakeShared<FJsonValueString>(MessageText));
+        }
+        else if (Severity == EMessageSeverity::Warning || Severity == EMessageSeverity::PerformanceWarning)
+        {
+            WarningArray.Add(MakeShared<FJsonValueString>(MessageText));
+        }
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("blueprint"), BlueprintName);
+    ResultObj->SetStringField(TEXT("old_parent"), OldParentName);
+    ResultObj->SetStringField(TEXT("new_parent"), ResolvedParentClass->GetName());
     ResultObj->SetBoolField(TEXT("compiled"), ErrorArray.Num() == 0);
 
     if (ErrorArray.Num() > 0)

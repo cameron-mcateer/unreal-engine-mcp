@@ -672,6 +672,40 @@ def compile_blueprint(blueprint_name: str) -> Dict[str, Any]:
         return {"success": False, "message": str(e)}
 
 @mcp.tool()
+def reparent_blueprint(blueprint_name: str, new_parent_class: str) -> Dict[str, Any]:
+    """Change a Blueprint's parent class.
+
+    Equivalent to File > Reparent Blueprint in the editor. After reparenting the
+    Blueprint is recompiled and any compiler errors/warnings are returned.
+
+    Args:
+        blueprint_name: Name or path of the Blueprint (e.g. "BP_Enemy" or "/Game/Blueprints/BP_Enemy").
+        new_parent_class: Short native name ("Character", "Pawn", "Actor") or full
+            asset path ("/Game/Blueprints/BP_MyBase") for the new parent class.
+
+    Returns:
+        blueprint: Name of the Blueprint.
+        old_parent: Previous parent class name.
+        new_parent: Resolved new parent class name.
+        compiled: True if the Blueprint compiled without errors after reparenting.
+        errors/warnings: Any compiler messages.
+    """
+    unreal = get_unreal_connection()
+    if not unreal:
+        return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+    try:
+        params = {
+            "blueprint_name": blueprint_name,
+            "new_parent_class": new_parent_class
+        }
+        response = unreal.send_command("reparent_blueprint", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"reparent_blueprint error: {e}")
+        return {"success": False, "message": str(e)}
+
+@mcp.tool()
 def read_blueprint_content(
     blueprint_path: str,
     include_event_graph: bool = True,
