@@ -405,6 +405,92 @@ TSharedPtr<FJsonObject> FNodePropertyManager::DispatchEditAction(
 		return Response;
 	}
 
+	// === ANY NODE: Set default value on an input pin by name ===
+	if (Action.Equals(TEXT("set_pin_default"), ESearchCase::IgnoreCase))
+	{
+		FString PinName;
+		if (!Params->TryGetStringField(TEXT("pin_name"), PinName))
+		{
+			return CreateErrorResponse(TEXT("set_pin_default requires 'pin_name' parameter"));
+		}
+
+		FString PinValue;
+		if (!Params->TryGetStringField(TEXT("pin_value"), PinValue))
+		{
+			// Try reading as number or bool and converting to string
+			double NumVal = 0.0;
+			bool BoolVal = false;
+			if (Params->TryGetNumberField(TEXT("pin_value"), NumVal))
+			{
+				if (FMath::IsNearlyEqual(NumVal, FMath::RoundToDouble(NumVal)))
+				{
+					PinValue = FString::FromInt(static_cast<int64>(NumVal));
+				}
+				else
+				{
+					PinValue = FString::SanitizeFloat(NumVal);
+				}
+			}
+			else if (Params->TryGetBoolField(TEXT("pin_value"), BoolVal))
+			{
+				PinValue = BoolVal ? TEXT("true") : TEXT("false");
+			}
+			else
+			{
+				return CreateErrorResponse(TEXT("set_pin_default requires 'pin_value' parameter (string, number, or bool)"));
+			}
+		}
+
+		UEdGraphPin* Pin = Node->FindPin(FName(*PinName));
+		if (!Pin)
+		{
+			// Build list of available input pins for the error message
+			TArray<FString> PinNames;
+			for (UEdGraphPin* NodePin : Node->Pins)
+			{
+				if (NodePin && NodePin->Direction == EGPD_Input)
+				{
+					PinNames.Add(NodePin->GetName());
+				}
+			}
+			FString AvailablePins = FString::Join(PinNames, TEXT(", "));
+			return CreateErrorResponse(FString::Printf(
+				TEXT("Pin '%s' not found on node. Available input pins: [%s]"),
+				*PinName, *AvailablePins));
+		}
+
+		if (Pin->Direction != EGPD_Input)
+		{
+			return CreateErrorResponse(FString::Printf(
+				TEXT("Pin '%s' is an output pin - can only set defaults on input pins"),
+				*PinName));
+		}
+
+		const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
+		if (Schema)
+		{
+			Schema->TrySetDefaultValue(*Pin, PinValue);
+		}
+		else
+		{
+			Pin->DefaultValue = PinValue;
+		}
+
+		Graph->NotifyGraphChanged();
+		UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForGraph(Graph);
+		if (Blueprint)
+		{
+			FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+		}
+
+		TSharedPtr<FJsonObject> Response = MakeShareable(new FJsonObject);
+		Response->SetBoolField(TEXT("success"), true);
+		Response->SetStringField(TEXT("action"), TEXT("set_pin_default"));
+		Response->SetStringField(TEXT("pin_name"), PinName);
+		Response->SetStringField(TEXT("pin_value"), PinValue);
+		return Response;
+	}
+
 	// Unknown action
 	return CreateErrorResponse(FString::Printf(TEXT("Unknown action: %s"), *Action));
 }

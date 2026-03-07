@@ -2677,6 +2677,78 @@ def delete_node(
 
 
 @mcp.tool()
+def set_pin_default(
+    blueprint_name: str,
+    node_id: str,
+    pin_name: str,
+    pin_value: Any,
+    function_name: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Set the default (literal/constant) value on an input pin of any Blueprint node.
+
+    This sets the inline value that appears on an unconnected input pin — equivalent
+    to typing a value into the pin's input box in the Blueprint editor. Use this for
+    hardcoded constants; use connect_nodes to wire dynamic values from other nodes.
+
+    Works on any node type: CallFunction, VariableSet, MathOperator, etc.
+
+    Args:
+        blueprint_name: Path to the Blueprint (e.g., "/Game/Blueprints/BP_Example")
+        node_id: ID of the node (e.g., "K2Node_CallFunction_2")
+        pin_name: Name of the input pin (e.g., "ItemId", "Quantity", "InString", "Duration")
+        pin_value: Value to set — string, int, float, or bool
+        function_name: Function graph name (optional, defaults to EventGraph)
+
+    Returns:
+        Dictionary with success status, pin_name, and pin_value set
+
+    Examples:
+        Set a string value on a CallFunction input pin:
+            set_pin_default(
+                blueprint_name="/Game/Blueprints/BP_Character",
+                node_id="K2Node_CallFunction_2",
+                pin_name="ItemId",
+                pin_value="organic_energy"
+            )
+
+        Set an integer value:
+            set_pin_default(
+                blueprint_name="/Game/Blueprints/BP_Character",
+                node_id="K2Node_CallFunction_2",
+                pin_name="Quantity",
+                pin_value=5
+            )
+
+        Set a boolean on a VariableSet node in a function graph:
+            set_pin_default(
+                blueprint_name="/Game/Blueprints/BP_Character",
+                node_id="K2Node_VariableSet_0",
+                pin_name="bIsInRift",
+                pin_value=true,
+                function_name="EnterRift"
+            )
+    """
+    unreal = get_unreal_connection()
+    if not unreal:
+        return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+    try:
+        result = node_properties.set_pin_default(
+            unreal,
+            blueprint_name,
+            node_id,
+            pin_name,
+            pin_value,
+            function_name
+        )
+        return result
+    except Exception as e:
+        logger.error(f"set_pin_default error: {e}", exc_info=True)
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
 def set_node_property(
     blueprint_name: str,
     node_id: str,
@@ -2706,6 +2778,9 @@ def set_node_property(
         property_value: Value to set (legacy mode)
         function_name: Name of function graph (optional, defaults to EventGraph)
         action: Semantic action to perform - can be one of:
+            Pin Defaults:
+                - "set_pin_default": Set literal value on an input pin (requires pin_name, pin_value)
+                  (Prefer using the dedicated set_pin_default tool instead)
             Phase 1 (Pin Management):
                 - "add_pin": Add a pin to a node (requires pin_type)
                 - "remove_pin": Remove a pin from a node (requires pin_name)

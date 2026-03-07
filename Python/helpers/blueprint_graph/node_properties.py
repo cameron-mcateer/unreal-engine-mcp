@@ -728,6 +728,45 @@ def set_cast_target(
     )
 
 
+def set_pin_default(
+    unreal_connection,
+    blueprint_name: str,
+    node_id: str,
+    pin_name: str,
+    pin_value: Any,
+    function_name: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Set the default (literal) value on an input pin of any node.
+
+    This sets the inline constant value that appears on an unconnected input pin,
+    equivalent to typing a value into the pin's input box in the Blueprint editor.
+
+    Args:
+        unreal_connection: Connection to Unreal Engine
+        blueprint_name: Name of the Blueprint
+        node_id: ID of the node
+        pin_name: Name of the input pin (e.g., "ItemId", "Quantity", "bIsInRift")
+        pin_value: Value to set (string, int, float, or bool — will be converted to string)
+        function_name: Name of function graph (None = EventGraph)
+
+    Returns:
+        Dictionary with success status, pin_name, and pin_value
+    """
+    # Convert pin_value to string for the action parameter
+    pin_value_str = str(pin_value) if not isinstance(pin_value, bool) else ("true" if pin_value else "false")
+
+    return set_node_property(
+        unreal_connection,
+        blueprint_name,
+        node_id,
+        action="set_pin_default",
+        function_name=function_name,
+        pin_name=pin_name,
+        pin_value=pin_value_str
+    )
+
+
 def set_function_call(
     unreal_connection,
     blueprint_name: str,
