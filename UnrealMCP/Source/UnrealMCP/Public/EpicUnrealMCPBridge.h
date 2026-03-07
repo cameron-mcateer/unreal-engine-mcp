@@ -37,6 +37,7 @@ public:
 	// Server functions
 	void StartServer();
 	void StopServer();
+	void RestartServer();
 	bool IsRunning() const { return bIsRunning; }
 
 	// Command execution

@@ -55,10 +55,7 @@
 #include "Commands/EpicUnrealMCPBlueprintCommands.h"
 #include "Commands/EpicUnrealMCPBlueprintGraphCommands.h"
 #include "Commands/EpicUnrealMCPCommonUtils.h"
-
-// Default settings
-#define MCP_SERVER_HOST "127.0.0.1"
-#define MCP_SERVER_PORT 55557
+#include "UnrealMCPSettings.h"
 
 UEpicUnrealMCPBridge::UEpicUnrealMCPBridge()
 {
@@ -83,8 +80,17 @@ void UEpicUnrealMCPBridge::Initialize(FSubsystemCollectionBase& Collection)
     ListenerSocket = nullptr;
     ConnectionSocket = nullptr;
     ServerThread = nullptr;
-    Port = MCP_SERVER_PORT;
-    FIPv4Address::Parse(MCP_SERVER_HOST, ServerAddress);
+
+    // Load settings and subscribe to changes
+    UUnrealMCPSettings* Settings = GetMutableDefault<UUnrealMCPSettings>();
+    Settings->OnSettingsChanged.AddUObject(this, &UEpicUnrealMCPBridge::RestartServer);
+
+    Port = static_cast<uint16>(FMath::Clamp(Settings->Port, 1, 65535));
+    if (!FIPv4Address::Parse(Settings->BindAddress, ServerAddress))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EpicUnrealMCPBridge: Invalid BindAddress '%s', falling back to 1270.0.0.1"), *Settings->BindAddress);
+        ServerAddress = FIPv4Address::Any;
+    }
 
     // Start the server automatically
     StartServer();
@@ -94,6 +100,10 @@ void UEpicUnrealMCPBridge::Initialize(FSubsystemCollectionBase& Collection)
 void UEpicUnrealMCPBridge::Deinitialize()
 {
     UE_LOG(LogTemp, Display, TEXT("EpicUnrealMCPBridge: Shutting down"));
+    if (UUnrealMCPSettings* Settings = GetMutableDefault<UUnrealMCPSettings>())
+    {
+        Settings->OnSettingsChanged.RemoveAll(this);
+    }
     StopServer();
 }
 
@@ -192,6 +202,23 @@ void UEpicUnrealMCPBridge::StopServer()
     }
 
     UE_LOG(LogTemp, Display, TEXT("EpicUnrealMCPBridge: Server stopped"));
+}
+
+// Restart the server with current settings
+void UEpicUnrealMCPBridge::RestartServer()
+{
+    UE_LOG(LogTemp, Display, TEXT("EpicUnrealMCPBridge: Settings changed, restarting server"));
+    StopServer();
+
+    const UUnrealMCPSettings* Settings = GetDefault<UUnrealMCPSettings>();
+    Port = static_cast<uint16>(FMath::Clamp(Settings->Port, 1, 65535));
+    if (!FIPv4Address::Parse(Settings->BindAddress, ServerAddress))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("EpicUnrealMCPBridge: Invalid BindAddress '%s', falling back to 1270.0.0.1"), *Settings->BindAddress);
+        ServerAddress = FIPv4Address::Any;
+    }
+
+    StartServer();
 }
 
 // Execute a command received from a client

@@ -26,6 +26,41 @@ Or configure it as an MCP server in your client config:
 
 **Requirements**: Python >=3.10, <3.14. Unreal must be open with the plugin enabled before tools can be invoked.
 
+### WSL / Remote Setup
+
+The Python MCP server can run in WSL while the Unreal plugin runs on the Windows host. Set `UNREAL_HOST` to the Windows host IP:
+
+```bash
+# Find the Windows host IP from WSL
+export UNREAL_HOST=$(ip route show default | awk '{print $3}')
+export UNREAL_PORT=55557  # optional, this is the default
+python unreal_mcp_server_advanced.py
+```
+
+Or in the MCP client config:
+```json
+{
+  "mcpServers": {
+    "unreal-advanced": {
+      "command": "python",
+      "args": ["/absolute/path/to/Python/unreal_mcp_server_advanced.py"],
+      "env": {
+        "UNREAL_HOST": "<windows-host-ip>"
+      }
+    }
+  }
+}
+```
+
+On the **Windows host**, two things are needed:
+
+1. **Plugin bind address**: In Unreal, go to **Project Settings > Plugins > UnrealMCP** and set `Bind Address` to `0.0.0.0` (accepts connections from all interfaces, including WSL). The default is `127.0.0.1` (localhost only).
+
+2. **Firewall rule**: Allow inbound TCP on the MCP port. From an **elevated PowerShell**:
+   ```powershell
+   New-NetFirewallRule -DisplayName "UnrealMCP" -Direction Inbound -Protocol TCP -LocalPort 55557 -Action Allow
+   ```
+
 ## Building the C++ Plugin
 
 Copy the `UnrealMCP/` directory into your Unreal project's `Plugins/` folder, then open the project in UE5.5+ and compile from the editor (Build > Build Solution), or use Unreal's `GenerateProjectFiles` script then build with Visual Studio / Rider. There is no standalone CMake or Makefile — the plugin is compiled as part of an Unreal project.
