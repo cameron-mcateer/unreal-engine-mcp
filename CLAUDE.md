@@ -123,7 +123,7 @@ result = await send_unreal_command("AddNode", {
 
 ## Unimplemented / Future Work
 
-- **Blueprint nodes**: Custom events, component events (`OnBeginOverlap`, `OnHit`), Timeline editing, String/Array operation nodes, Animation Blueprint support
+- **Blueprint nodes**: Custom events, Timeline editing, String/Array operation nodes, Animation Blueprint support
 - **Asset management**: Import/export assets, create materials programmatically, texture manipulation, static mesh creation/modification
 - **Level/World**: Level streaming, world composition, lighting manipulation, post-process volume control
 - **Gameplay systems**: Collision preset management, input action/axis binding, game mode/state manipulation, Widget/UMG creation

@@ -6,6 +6,7 @@
 #include "Commands/BlueprintGraph/Nodes/AnimationNodes.h"
 #include "Commands/BlueprintGraph/Nodes/SpecializedNodes.h"
 #include "Commands/BlueprintGraph/Nodes/MathNodes.h"
+#include "Commands/BlueprintGraph/Nodes/EventNodes.h"
 #include "Engine/Blueprint.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraphSchema_K2.h"
@@ -217,6 +218,11 @@ TSharedPtr<FJsonObject> FBlueprintNodeManager::AddNode(const TSharedPtr<FJsonObj
 	else if (NodeType.Equals(TEXT("MathOperator"), ESearchCase::IgnoreCase))
 	{
 		NewNode = FMathNodeCreator::CreateMathOperatorNode(Graph, NodeParams);
+	}
+	// Component Bound Event nodes
+	else if (NodeType.Equals(TEXT("ComponentEvent"), ESearchCase::IgnoreCase))
+	{
+		NewNode = FEventNodeCreator::CreateComponentBoundEventNode(BP, Graph, NodeParams);
 	}
 	// Event nodes (kept for backward compatibility - should use add_event_node)
 	else if (NodeType.Equals(TEXT("Event"), ESearchCase::IgnoreCase))

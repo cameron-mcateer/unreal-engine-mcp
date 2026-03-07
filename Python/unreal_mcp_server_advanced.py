@@ -2130,17 +2130,18 @@ def add_node(
     function_name: Optional[str] = None,
     operator: str = "",
     pin_type: str = "",
-    target_class: str = ""
+    target_class: str = "",
+    component_name: str = ""
 ) -> Dict[str, Any]:
     """
     Add a node to a Blueprint graph.
 
     Create various types of K2Nodes in a Blueprint's event graph or function graph.
-    Supports 24 node types organized by category.
+    Supports 25 node types organized by category.
 
     Args:
         blueprint_name: Name of the Blueprint to modify
-        node_type: Type of node to create. Supported types (24 total):
+        node_type: Type of node to create. Supported types (25 total):
 
             CONTROL FLOW:
                 "Branch" - Conditional execution (if/then/else)
@@ -2212,6 +2213,17 @@ def add_node(
                     ℹ️ Use get_blueprint_events(blueprint_name) to discover every event
                        available on the Blueprint's class hierarchy and its output pins.
                     ℹ️ Tick events run every frame - be mindful of performance impact
+                "ComponentEvent" - Component-level delegate event node.
+                    Binds to a multicast delegate on a component in the Blueprint's SCS.
+                    Requires component_name= and event_type= parameters.
+                    ⚠️ The component must already exist (added via add_component_to_blueprint).
+                    Supported event_type values:
+                        "OnComponentBeginOverlap" - pins: OverlappedComponent, OtherActor,
+                            OtherComp, OtherBodyIndex, bFromSweep, SweepResult
+                        "OnComponentEndOverlap" - pins: OverlappedComponent, OtherActor,
+                            OtherComp, OtherBodyIndex
+                        "OnComponentHit" - pins: HitComponent, OtherActor, OtherComp,
+                            NormalImpulse, Hit
 
         pos_x: X position in graph (default: 0)
         pos_y: Y position in graph (default: 0)
@@ -2237,6 +2249,8 @@ def add_node(
                       (e.g. "/Game/Blueprints/BP_Foo.BP_Foo_C" or "ACharacter_C").
                       Required for DynamicCast and ClassDynamicCast — omitting it
                       creates a non-functional wildcard cast node.
+        component_name: For ComponentEvent nodes, the name of the component in the Blueprint
+                        (as passed to add_component_to_blueprint). Required for ComponentEvent.
 
     Returns:
         Dictionary with success status, node_id, and position
@@ -2249,6 +2263,10 @@ def add_node(
     """
     if node_type in ("DynamicCast", "ClassDynamicCast") and not target_class:
         return {"success": False, "error": f"{node_type} requires target_class"}
+    if node_type == "ComponentEvent" and not component_name:
+        return {"success": False, "error": "ComponentEvent requires component_name"}
+    if node_type == "ComponentEvent" and not event_type:
+        return {"success": False, "error": "ComponentEvent requires event_type"}
 
     unreal = get_unreal_connection()
     if not unreal:
@@ -2278,6 +2296,8 @@ def add_node(
             node_params["pin_type"] = pin_type
         if target_class:
             node_params["target_class"] = target_class
+        if component_name:
+            node_params["component_name"] = component_name
 
         result = node_manager.add_node(
             unreal,

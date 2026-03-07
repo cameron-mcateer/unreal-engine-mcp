@@ -318,6 +318,49 @@ def add_engine_call_node(
     )
 
 
+def add_component_event_node(
+    unreal_connection,
+    blueprint_name: str,
+    component_name: str,
+    event_type: str,
+    pos_x: float = 0,
+    pos_y: float = 0
+) -> Dict[str, Any]:
+    """
+    Add a Component Bound Event node to a Blueprint graph.
+
+    Creates a UK2Node_ComponentBoundEvent that binds to a multicast delegate
+    on a component in the Blueprint's SimpleConstructionScript.
+
+    Args:
+        unreal_connection: Connection to Unreal Engine
+        blueprint_name: Name of the Blueprint
+        component_name: Name of the component (as added via add_component_to_blueprint)
+        event_type: Delegate name on the component. Common values:
+            "OnComponentBeginOverlap", "OnComponentEndOverlap", "OnComponentHit"
+        pos_x: X position in graph
+        pos_y: Y position in graph
+
+    Returns:
+        Dictionary containing node_id and status
+
+    Example:
+        >>> add_component_event_node(unreal, "BP_Enemy", "AggroRange",
+        ...     "OnComponentBeginOverlap", 0, 0)
+    """
+    return add_node(
+        unreal_connection,
+        blueprint_name,
+        "ComponentEvent",
+        {
+            "pos_x": pos_x,
+            "pos_y": pos_y,
+            "component_name": component_name,
+            "event_type": event_type
+        }
+    )
+
+
 def add_math_operator_node(
     unreal_connection,
     blueprint_name: str,
