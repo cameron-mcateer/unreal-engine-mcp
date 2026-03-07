@@ -67,8 +67,8 @@ def set_node_property(
     unreal_connection,
     blueprint_name: str,
     node_id: str,
-    property_name: str,
-    property_value: Any,
+    property_name: str = "",
+    property_value: Any = None,
     function_name: Optional[str] = None,
     action: Optional[str] = None,
     **kwargs
