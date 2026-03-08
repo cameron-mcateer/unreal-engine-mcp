@@ -236,11 +236,28 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
     TPromise<FString> Promise;
     TFuture<FString> Future = Promise.GetFuture();
     
+    // Capture a weak pointer so the lambda can detect if the subsystem was destroyed
+    TWeakObjectPtr<UEpicUnrealMCPBridge> WeakThis(this);
+
     // Queue execution on Game Thread
-    AsyncTask(ENamedThreads::GameThread, [this, CommandType, Params, Promise = MoveTemp(Promise)]() mutable
+    AsyncTask(ENamedThreads::GameThread, [WeakThis, CommandType, Params, Promise = MoveTemp(Promise)]() mutable
     {
         TSharedPtr<FJsonObject> ResponseJson = MakeShareable(new FJsonObject);
-        
+
+        // Check that the subsystem is still alive before accessing members
+        UEpicUnrealMCPBridge* Self = WeakThis.Get();
+        if (!Self)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("EpicUnrealMCPBridge: Subsystem destroyed before command '%s' could execute"), *CommandType);
+            ResponseJson->SetStringField(TEXT("status"), TEXT("error"));
+            ResponseJson->SetStringField(TEXT("error"), TEXT("MCP subsystem was shut down"));
+            FString ResultString;
+            TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResultString);
+            FJsonSerializer::Serialize(ResponseJson.ToSharedRef(), Writer);
+            Promise.SetValue(ResultString);
+            return;
+        }
+
         try
         {
             TSharedPtr<FJsonObject> ResultJson;
@@ -258,7 +275,7 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                      CommandType == TEXT("set_actor_transform") ||
                      CommandType == TEXT("spawn_blueprint_actor"))
             {
-                ResultJson = EditorCommands->HandleCommand(CommandType, Params);
+                ResultJson = Self->EditorCommands->HandleCommand(CommandType, Params);
             }
             // Blueprint Commands
             else if (CommandType == TEXT("create_blueprint") ||
@@ -279,7 +296,7 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                      CommandType == TEXT("get_blueprint_available_events") ||
                      CommandType == TEXT("reparent_blueprint"))
             {
-                ResultJson = BlueprintCommands->HandleCommand(CommandType, Params);
+                ResultJson = Self->BlueprintCommands->HandleCommand(CommandType, Params);
             }
             // Blueprint Graph Commands
             else if (CommandType == TEXT("add_blueprint_node") ||
@@ -296,20 +313,20 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                      CommandType == TEXT("delete_function") ||
                      CommandType == TEXT("rename_function"))
             {
-                ResultJson = BlueprintGraphCommands->HandleCommand(CommandType, Params);
+                ResultJson = Self->BlueprintGraphCommands->HandleCommand(CommandType, Params);
             }
             // Widget Commands
             else if (CommandType == TEXT("create_widget_blueprint") ||
                      CommandType == TEXT("add_widget_child") ||
                      CommandType == TEXT("get_widget_children"))
             {
-                ResultJson = WidgetCommands->HandleCommand(CommandType, Params);
+                ResultJson = Self->WidgetCommands->HandleCommand(CommandType, Params);
             }
             // Input Commands (Enhanced Input)
             else if (CommandType == TEXT("create_input_action") ||
                      CommandType == TEXT("add_input_mapping"))
             {
-                ResultJson = InputCommands->HandleCommand(CommandType, Params);
+                ResultJson = Self->InputCommands->HandleCommand(CommandType, Params);
             }
             else
             {

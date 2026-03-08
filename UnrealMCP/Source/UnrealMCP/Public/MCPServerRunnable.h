@@ -4,6 +4,7 @@
 #include "HAL/Runnable.h"
 #include "Sockets.h"
 #include "Interfaces/IPv4/IPv4Address.h"
+#include "UObject/WeakObjectPtrTemplates.h"
 
 class UEpicUnrealMCPBridge;
 
@@ -27,7 +28,7 @@ protected:
 	void ProcessMessage(TSharedPtr<FSocket> Client, const FString& Message);
 
 private:
-	UEpicUnrealMCPBridge* Bridge;
+	TWeakObjectPtr<UEpicUnrealMCPBridge> Bridge;
 	TSharedPtr<FSocket> ListenerSocket;
 	TSharedPtr<FSocket> ClientSocket;
 	bool bRunning;

@@ -82,8 +82,17 @@ uint32 FMCPServerRunnable::Run()
                             {
                                 UE_LOG(LogTemp, Display, TEXT("MCPServerRunnable: Executing command: %s"), *CommandType);
 
+                                // Check bridge is still alive (may be destroyed during hot-reload)
+                                UEpicUnrealMCPBridge* BridgePtr = Bridge.Get();
+                                if (!BridgePtr)
+                                {
+                                    UE_LOG(LogTemp, Warning, TEXT("MCPServerRunnable: Bridge destroyed, dropping command '%s'"), *CommandType);
+                                    bRunning = false;
+                                    break;
+                                }
+
                                 // Execute command
-                                FString Response = Bridge->ExecuteCommand(CommandType, JsonObject->GetObjectField(TEXT("params")));
+                                FString Response = BridgePtr->ExecuteCommand(CommandType, JsonObject->GetObjectField(TEXT("params")));
 
                                 UE_LOG(LogTemp, Display, TEXT("MCPServerRunnable: Command executed, response length: %d"), Response.Len());
 
@@ -332,9 +341,17 @@ void FMCPServerRunnable::ProcessMessage(TSharedPtr<FSocket> Client, const FStrin
     }
     
     UE_LOG(LogTemp, Display, TEXT("MCPServerRunnable: Executing command: %s"), *CommandType);
-    
+
+    // Check bridge is still alive
+    UEpicUnrealMCPBridge* BridgePtr = Bridge.Get();
+    if (!BridgePtr)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("MCPServerRunnable: Bridge destroyed, dropping command '%s'"), *CommandType);
+        return;
+    }
+
     // Execute command
-    FString Response = Bridge->ExecuteCommand(CommandType, Params);
+    FString Response = BridgePtr->ExecuteCommand(CommandType, Params);
     
     // Send response with newline terminator
     Response += TEXT("\n");
