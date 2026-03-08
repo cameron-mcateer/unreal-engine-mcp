@@ -44,7 +44,8 @@ public class UnrealMCP : ModuleRules
 				"PhysicsCore",
 				"UnrealEd",           // For Blueprint editing
 				"BlueprintGraph",     // For K2Node classes (F15-F22)
-				"KismetCompiler"      // For Blueprint compilation (F15-F22)
+				"KismetCompiler",     // For Blueprint compilation (F15-F22)
+				"UMG"                 // For UMG widget classes (UCanvasPanel, UProgressBar, etc.)
 			}
 		);
 		
@@ -57,7 +58,8 @@ public class UnrealMCP : ModuleRules
 				"SlateCore",
 				"Kismet",
 				"Projects",
-				"AssetRegistry"
+				"AssetRegistry",
+				"UMGEditor"           // For UWidgetBlueprint, widget blueprint creation
 			}
 		);
 		

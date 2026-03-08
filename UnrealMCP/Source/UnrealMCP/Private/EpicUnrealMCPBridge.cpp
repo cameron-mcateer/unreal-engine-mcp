@@ -55,6 +55,7 @@
 #include "Commands/EpicUnrealMCPBlueprintCommands.h"
 #include "Commands/EpicUnrealMCPBlueprintGraphCommands.h"
 #include "Commands/EpicUnrealMCPCommonUtils.h"
+#include "Commands/EpicUnrealMCPWidgetCommands.h"
 #include "UnrealMCPSettings.h"
 
 UEpicUnrealMCPBridge::UEpicUnrealMCPBridge()
@@ -62,6 +63,7 @@ UEpicUnrealMCPBridge::UEpicUnrealMCPBridge()
     EditorCommands = MakeShared<FEpicUnrealMCPEditorCommands>();
     BlueprintCommands = MakeShared<FEpicUnrealMCPBlueprintCommands>();
     BlueprintGraphCommands = MakeShared<FEpicUnrealMCPBlueprintGraphCommands>();
+    WidgetCommands = MakeShared<FEpicUnrealMCPWidgetCommands>();
 }
 
 UEpicUnrealMCPBridge::~UEpicUnrealMCPBridge()
@@ -69,6 +71,7 @@ UEpicUnrealMCPBridge::~UEpicUnrealMCPBridge()
     EditorCommands.Reset();
     BlueprintCommands.Reset();
     BlueprintGraphCommands.Reset();
+    WidgetCommands.Reset();
 }
 
 // Initialize subsystem
@@ -291,6 +294,13 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                      CommandType == TEXT("rename_function"))
             {
                 ResultJson = BlueprintGraphCommands->HandleCommand(CommandType, Params);
+            }
+            // Widget Commands
+            else if (CommandType == TEXT("create_widget_blueprint") ||
+                     CommandType == TEXT("add_widget_child") ||
+                     CommandType == TEXT("get_widget_children"))
+            {
+                ResultJson = WidgetCommands->HandleCommand(CommandType, Params);
             }
             else
             {

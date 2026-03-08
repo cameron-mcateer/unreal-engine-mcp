@@ -3143,8 +3143,156 @@ def rename_function(
         return {"success": False, "message": str(e)}
 
 
-# Run the server
+# ============================================================================
+# Widget Blueprint Tools
+# ============================================================================
 
+@mcp.tool()
+def create_widget_blueprint(
+    name: str,
+    parent_class: str = "UserWidget"
+) -> Dict[str, Any]:
+    """Create a new Widget Blueprint (UMG).
+
+    Creates a Widget Blueprint with a CanvasPanel as the root widget,
+    ready for adding child widgets via add_widget_child.
+
+    Args:
+        name: Name for the Widget Blueprint (e.g. "WBP_PlayerHUD")
+        parent_class: Parent class, must derive from UserWidget (default: "UserWidget")
+
+    Returns:
+        Dictionary with name, path, root_widget, root_widget_type
+    """
+    unreal = get_unreal_connection()
+    if not unreal:
+        return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+    try:
+        params = {
+            "name": name,
+            "parent_class": parent_class
+        }
+        response = unreal.send_command("create_widget_blueprint", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"create_widget_blueprint error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def add_widget_child(
+    blueprint_name: str,
+    widget_type: str,
+    widget_name: str,
+    parent_widget_name: str = "",
+    position: List[float] = [],
+    size: List[float] = [],
+    anchors: List[float] = [],
+    alignment: List[float] = [],
+    z_order: int = 0,
+    properties: Dict[str, Any] = {}
+) -> Dict[str, Any]:
+    """Add a UMG widget to a Widget Blueprint's hierarchy.
+
+    Adds a widget as a child of a parent container widget (CanvasPanel,
+    VerticalBox, HorizontalBox, etc.). Mirrors the UMG designer drag-and-drop.
+
+    Args:
+        blueprint_name: Name or path of the Widget Blueprint (e.g. "WBP_PlayerHUD"
+            or "/Game/Blueprints/WBP_PlayerHUD")
+        widget_type: Type of widget to add. Supported types:
+            CanvasPanel, ProgressBar, TextBlock, Image, Button,
+            HorizontalBox, VerticalBox, Border, Spacer, SizeBox
+        widget_name: Unique name for the widget (e.g. "HealthBar")
+        parent_widget_name: Name of parent container widget. Defaults to root widget.
+        position: [X, Y] position offset (canvas slot only)
+        size: [Width, Height] size (canvas slot only)
+        anchors: [MinX, MinY, MaxX, MaxY] anchor values 0-1 (canvas slot only).
+            Common presets: [0,0,0,0]=TopLeft, [0.5,0,0.5,0]=TopCenter,
+            [0,0,1,1]=Stretch
+        alignment: [X, Y] pivot point 0-1 (canvas slot only)
+        z_order: Render order, higher = on top (canvas slot only, default 0)
+        properties: Widget-specific properties dict. Supported per type:
+            Common: Visibility ("Visible"|"Collapsed"|"Hidden"|"HitTestInvisible"|
+                "SelfHitTestInvisible"), IsEnabled (bool), RenderOpacity (float),
+                ToolTipText (string)
+            ProgressBar: Percent (float 0-1), FillColorAndOpacity ([R,G,B,A]),
+                IsMarquee (bool)
+            TextBlock: Text (string), ColorAndOpacity ([R,G,B,A]),
+                FontSize (int), Justification ("Left"|"Center"|"Right")
+            Image: ColorAndOpacity ([R,G,B,A]), Brush (texture asset path)
+            Button: BackgroundColor ([R,G,B,A])
+            Border: ContentColorAndOpacity ([R,G,B,A]), BrushColor ([R,G,B,A])
+            SizeBox: WidthOverride (float), HeightOverride (float)
+
+    Returns:
+        Dictionary with widget_name, widget_type, parent, has_canvas_slot
+    """
+    unreal = get_unreal_connection()
+    if not unreal:
+        return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+    try:
+        params = {
+            "blueprint_name": blueprint_name,
+            "widget_type": widget_type,
+            "widget_name": widget_name,
+        }
+        if parent_widget_name:
+            params["parent_widget_name"] = parent_widget_name
+        if position:
+            params["position"] = position
+        if size:
+            params["size"] = size
+        if anchors:
+            params["anchors"] = anchors
+        if alignment:
+            params["alignment"] = alignment
+        if z_order:
+            params["z_order"] = z_order
+        if properties:
+            params["properties"] = properties
+        response = unreal.send_command("add_widget_child", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"add_widget_child error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def get_widget_children(
+    blueprint_name: str
+) -> Dict[str, Any]:
+    """Get the widget hierarchy of a Widget Blueprint.
+
+    Returns all widgets in the Widget Blueprint's tree with their types,
+    parent relationships, and canvas slot properties (position, size, anchors).
+
+    Args:
+        blueprint_name: Name or path of the Widget Blueprint
+
+    Returns:
+        Dictionary with widgets array, each containing:
+            name, type, parent, is_panel, child_count (if panel),
+            slot (if in canvas: position, size, anchors, alignment, z_order)
+    """
+    unreal = get_unreal_connection()
+    if not unreal:
+        return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+    try:
+        params = {
+            "blueprint_name": blueprint_name
+        }
+        response = unreal.send_command("get_widget_children", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"get_widget_children error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+# Run the server
 
 
 
