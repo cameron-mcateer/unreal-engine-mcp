@@ -1364,6 +1364,49 @@ def spawn_physics_blueprint_actor (
         return {"success": False, "message": str(e)}
 
 @mcp.tool()
+def spawn_actor_from_blueprint(
+    blueprint_path: str,
+    name: str,
+    location: List[float] = [0.0, 0.0, 0.0],
+    rotation: List[float] = [0.0, 0.0, 0.0],
+    scale: List[float] = [1.0, 1.0, 1.0]
+) -> Dict[str, Any]:
+    """
+    Spawn an instance of an existing Blueprint asset into the current level.
+
+    Use this to place instances of user-created Blueprints (e.g. BP_Enemy, BP_CraftingStation)
+    into the level. Unlike spawn_physics_blueprint_actor which creates a temporary Blueprint,
+    this spawns from an already-existing Blueprint asset.
+
+    Args:
+        blueprint_path: Path to the Blueprint asset. Either a full path like
+                        "/Game/Blueprints/BP_RiftPortal" or just the asset name
+                        like "BP_RiftPortal" (assumes /Game/Blueprints/ prefix).
+        name: Display name / label for the spawned actor instance.
+        location: [X, Y, Z] world position to spawn at.
+        rotation: [Pitch, Yaw, Roll] rotation in degrees.
+        scale: [X, Y, Z] scale to apply after spawning.
+
+    Returns:
+        Dict with actor details on success, error message on failure.
+    """
+    unreal = get_unreal_connection()
+    if not unreal:
+        return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+    try:
+        result = spawn_blueprint_actor(unreal, blueprint_path, name, location, rotation)
+
+        if result and result.get("status") == "success" and scale != [1.0, 1.0, 1.0]:
+            spawned_name = result.get("result", {}).get("name", name)
+            set_actor_transform(spawned_name, scale=scale)
+
+        return result or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"spawn_actor_from_blueprint error: {e}")
+        return {"success": False, "message": str(e)}
+
+@mcp.tool()
 def create_maze(
     rows: int = 8,
     cols: int = 8,
