@@ -56,6 +56,7 @@
 #include "Commands/EpicUnrealMCPBlueprintGraphCommands.h"
 #include "Commands/EpicUnrealMCPCommonUtils.h"
 #include "Commands/EpicUnrealMCPWidgetCommands.h"
+#include "Commands/EpicUnrealMCPInputCommands.h"
 #include "UnrealMCPSettings.h"
 
 UEpicUnrealMCPBridge::UEpicUnrealMCPBridge()
@@ -64,6 +65,7 @@ UEpicUnrealMCPBridge::UEpicUnrealMCPBridge()
     BlueprintCommands = MakeShared<FEpicUnrealMCPBlueprintCommands>();
     BlueprintGraphCommands = MakeShared<FEpicUnrealMCPBlueprintGraphCommands>();
     WidgetCommands = MakeShared<FEpicUnrealMCPWidgetCommands>();
+    InputCommands = MakeShared<FEpicUnrealMCPInputCommands>();
 }
 
 UEpicUnrealMCPBridge::~UEpicUnrealMCPBridge()
@@ -72,6 +74,7 @@ UEpicUnrealMCPBridge::~UEpicUnrealMCPBridge()
     BlueprintCommands.Reset();
     BlueprintGraphCommands.Reset();
     WidgetCommands.Reset();
+    InputCommands.Reset();
 }
 
 // Initialize subsystem
@@ -301,6 +304,12 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                      CommandType == TEXT("get_widget_children"))
             {
                 ResultJson = WidgetCommands->HandleCommand(CommandType, Params);
+            }
+            // Input Commands (Enhanced Input)
+            else if (CommandType == TEXT("create_input_action") ||
+                     CommandType == TEXT("add_input_mapping"))
+            {
+                ResultJson = InputCommands->HandleCommand(CommandType, Params);
             }
             else
             {

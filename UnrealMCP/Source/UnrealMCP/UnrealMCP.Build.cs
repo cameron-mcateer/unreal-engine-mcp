@@ -45,7 +45,9 @@ public class UnrealMCP : ModuleRules
 				"UnrealEd",           // For Blueprint editing
 				"BlueprintGraph",     // For K2Node classes (F15-F22)
 				"KismetCompiler",     // For Blueprint compilation (F15-F22)
-				"UMG"                 // For UMG widget classes (UCanvasPanel, UProgressBar, etc.)
+				"UMG",                // For UMG widget classes (UCanvasPanel, UProgressBar, etc.)
+				"EnhancedInput",      // For UInputAction, UInputMappingContext
+				"InputBlueprintNodes" // For UK2Node_EnhancedInputAction
 			}
 		);
 		

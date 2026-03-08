@@ -2175,7 +2175,8 @@ def add_node(
     operator: str = "",
     pin_type: str = "",
     target_class: str = "",
-    component_name: str = ""
+    component_name: str = "",
+    input_action: str = ""
 ) -> Dict[str, Any]:
     """
     Add a node to a Blueprint graph.
@@ -2268,6 +2269,12 @@ def add_node(
                             OtherComp, OtherBodyIndex
                         "OnComponentHit" - pins: HitComponent, OtherActor, OtherComp,
                             NormalImpulse, Hit
+                "InputActionEvent" - Enhanced Input action event node.
+                    Creates a UK2Node_EnhancedInputAction with exec pins for each trigger event:
+                    Started, Triggered, Ongoing, Canceled, Completed.
+                    Requires input_action= parameter (asset path to UInputAction).
+                    Also exposes ActionValue, ElapsedSeconds, TriggeredSeconds output pins.
+                    ⚠️ The UInputAction asset must already exist (use create_input_action tool).
 
         pos_x: X position in graph (default: 0)
         pos_y: Y position in graph (default: 0)
@@ -2295,6 +2302,9 @@ def add_node(
                       creates a non-functional wildcard cast node.
         component_name: For ComponentEvent nodes, the name of the component in the Blueprint
                         (as passed to add_component_to_blueprint). Required for ComponentEvent.
+        input_action: For InputActionEvent nodes, the asset path to the UInputAction
+                      (e.g. "/Game/Input/IA_Attack"). Required for InputActionEvent.
+                      Create the asset first with create_input_action tool.
 
     Returns:
         Dictionary with success status, node_id, and position
@@ -2311,6 +2321,8 @@ def add_node(
         return {"success": False, "error": "ComponentEvent requires component_name"}
     if node_type == "ComponentEvent" and not event_type:
         return {"success": False, "error": "ComponentEvent requires event_type"}
+    if node_type == "InputActionEvent" and not input_action:
+        return {"success": False, "error": "InputActionEvent requires input_action"}
 
     unreal = get_unreal_connection()
     if not unreal:
@@ -2342,6 +2354,8 @@ def add_node(
             node_params["target_class"] = target_class
         if component_name:
             node_params["component_name"] = component_name
+        if input_action:
+            node_params["input_action"] = input_action
 
         result = node_manager.add_node(
             unreal,
@@ -3292,8 +3306,95 @@ def get_widget_children(
         return {"success": False, "message": str(e)}
 
 
-# Run the server
+@mcp.tool()
+def create_input_action(
+    name: str,
+    value_type: str = "bool",
+    path: str = "/Game/Input/",
+    consume_input: bool = True,
+    trigger_when_paused: bool = False
+) -> Dict[str, Any]:
+    """
+    Create an Enhanced Input Action asset (UInputAction).
 
+    Input Actions represent logical player actions like "Jump", "Attack", or "Move".
+    They are used with InputMappingContexts and Enhanced Input event nodes in Blueprints.
+
+    Args:
+        name: Name for the input action asset (e.g. "IA_Attack", "IA_Jump")
+        value_type: The value type this action returns. Options:
+            "bool" (default) - Digital on/off (button press)
+            "float" / "axis1d" - Single axis (trigger pressure, mouse wheel)
+            "vector2d" / "axis2d" - 2D axis (mouse delta, gamepad stick)
+            "vector3d" / "vector" / "axis3d" - 3D axis (motion controller)
+        path: Package path for the asset (default: "/Game/Input/")
+        consume_input: Whether this action consumes input from lower priority mappings (default: True)
+        trigger_when_paused: Whether this action can trigger while game is paused (default: False)
+
+    Returns:
+        Dictionary with name, path, and value_type of the created asset
+    """
+    unreal = get_unreal_connection()
+    if not unreal:
+        return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+    try:
+        params = {
+            "name": name,
+            "value_type": value_type,
+            "path": path,
+            "consume_input": consume_input,
+            "trigger_when_paused": trigger_when_paused
+        }
+        response = unreal.send_command("create_input_action", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"create_input_action error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def add_input_mapping(
+    mapping_context: str,
+    input_action: str,
+    key: str
+) -> Dict[str, Any]:
+    """
+    Add a key mapping to an existing InputMappingContext.
+
+    Maps a physical key/button to an InputAction within a mapping context.
+    The mapping context and input action assets must already exist.
+
+    Args:
+        mapping_context: Path to the InputMappingContext asset
+            (e.g. "/Game/ThirdPerson/Input/IMC_Default")
+        input_action: Path to the InputAction asset
+            (e.g. "/Game/Input/IA_Attack")
+        key: The key/button name to map. Common values:
+            Mouse: "LeftMouseButton", "RightMouseButton", "MiddleMouseButton"
+            Keyboard: "SpaceBar", "LeftShift", "LeftControl", "E", "Q", "W", "A", "S", "D"
+            Gamepad: "Gamepad_FaceButton_Bottom" (A/Cross), "Gamepad_FaceButton_Right" (B/Circle),
+                     "Gamepad_LeftTrigger", "Gamepad_RightTrigger",
+                     "Gamepad_LeftThumbstick_X", "Gamepad_LeftThumbstick_Y"
+
+    Returns:
+        Dictionary with mapping_context, input_action, and key confirming the mapping
+    """
+    unreal = get_unreal_connection()
+    if not unreal:
+        return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+    try:
+        params = {
+            "mapping_context": mapping_context,
+            "input_action": input_action,
+            "key": key
+        }
+        response = unreal.send_command("add_input_mapping", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"add_input_mapping error: {e}")
+        return {"success": False, "message": str(e)}
 
 
 # Run the server

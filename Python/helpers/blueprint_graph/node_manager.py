@@ -361,6 +361,45 @@ def add_component_event_node(
     )
 
 
+def add_input_action_event_node(
+    unreal_connection,
+    blueprint_name: str,
+    input_action: str,
+    pos_x: float = 0,
+    pos_y: float = 0
+) -> Dict[str, Any]:
+    """
+    Add an Enhanced Input Action event node to a Blueprint graph.
+
+    Creates a UK2Node_EnhancedInputAction with exec pins for each trigger event:
+    Started, Triggered, Ongoing, Canceled, Completed.
+
+    Args:
+        unreal_connection: Connection to Unreal Engine
+        blueprint_name: Name of the Blueprint
+        input_action: Asset path to the UInputAction (e.g. "/Game/Input/IA_Attack")
+        pos_x: X position in graph
+        pos_y: Y position in graph
+
+    Returns:
+        Dictionary containing node_id and status
+
+    Example:
+        >>> add_input_action_event_node(unreal, "BP_ThirdPersonCharacter",
+        ...     "/Game/Input/IA_Attack", 0, 0)
+    """
+    return add_node(
+        unreal_connection,
+        blueprint_name,
+        "InputActionEvent",
+        {
+            "pos_x": pos_x,
+            "pos_y": pos_y,
+            "input_action": input_action
+        }
+    )
+
+
 def add_math_operator_node(
     unreal_connection,
     blueprint_name: str,

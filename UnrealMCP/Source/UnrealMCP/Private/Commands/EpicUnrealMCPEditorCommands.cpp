@@ -237,8 +237,9 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleDeleteActor(const TS
             // Store actor info before deletion for the response
             TSharedPtr<FJsonObject> ActorInfo = FEpicUnrealMCPCommonUtils::ActorToJsonObject(Actor);
             
-            // Delete the actor
-            Actor->Destroy();
+            // Delete via editor subsystem so external actor files are cleaned up
+            UEditorActorSubsystem* EditorActorSubsystem = GEditor->GetEditorSubsystem<UEditorActorSubsystem>();
+            EditorActorSubsystem->DestroyActor(Actor);
             
             TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
             ResultObj->SetObjectField(TEXT("deleted_actor"), ActorInfo);
