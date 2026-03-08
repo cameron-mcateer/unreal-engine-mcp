@@ -108,7 +108,10 @@ UK2Node_Event* FEventManager::CreateEventNode(UEdGraph* Graph, const FString& Ev
 	if (EventFunction)
 	{
 		EventNode = NewObject<UK2Node_Event>(Graph);
-		EventNode->EventReference.SetExternalMember(FName(*EventName), BlueprintClass);
+		// Use SetFromField to correctly resolve the owning class (e.g. AActor for
+		// ReceiveBeginPlay) rather than pointing at the Blueprint's generated class.
+		EventNode->EventReference.SetFromField<UFunction>(EventFunction, false);
+		EventNode->bOverrideFunction = true;
 		EventNode->NodePosX = static_cast<int32>(Position.X);
 		EventNode->NodePosY = static_cast<int32>(Position.Y);
 		Graph->AddNode(EventNode, true);
