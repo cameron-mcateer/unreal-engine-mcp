@@ -280,6 +280,7 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                      CommandType == TEXT("connect_nodes") ||
                      CommandType == TEXT("create_variable") ||
                      CommandType == TEXT("set_blueprint_variable_properties") ||
+                     CommandType == TEXT("delete_variable") ||
                      CommandType == TEXT("add_event_node") ||
                      CommandType == TEXT("delete_node") ||
                      CommandType == TEXT("set_node_property") ||

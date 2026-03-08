@@ -2643,6 +2643,40 @@ def set_blueprint_variable_properties(
         return {"success": False, "message": str(e)}
 
 @mcp.tool()
+def delete_variable(
+    blueprint_name: str,
+    variable_name: str
+) -> Dict[str, Any]:
+    """
+    Delete a variable from a Blueprint.
+
+    Removes the variable and cleans up any VariableGet/VariableSet nodes that reference it.
+    Use this when migrating variables to C++ or removing unused Blueprint variables.
+
+    Args:
+        blueprint_name: Name or path of the Blueprint (e.g., "BP_Player" or
+                        "/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter")
+        variable_name: Name of the variable to delete (e.g., "bIsInRift", "Health")
+
+    Returns:
+        Dictionary with success status and deleted variable name.
+    """
+    unreal = get_unreal_connection()
+    if not unreal:
+        return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+    try:
+        result = variable_manager.delete_variable(
+            unreal,
+            blueprint_name,
+            variable_name
+        )
+        return result
+    except Exception as e:
+        logger.error(f"delete_variable error: {e}")
+        return {"success": False, "message": str(e)}
+
+@mcp.tool()
 def add_event_node(
     blueprint_name: str,
     event_name: str,

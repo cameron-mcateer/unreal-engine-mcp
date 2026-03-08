@@ -107,6 +107,49 @@ def create_variable(
         }
 
 
+def delete_variable(
+    unreal_connection,
+    blueprint_name: str,
+    variable_name: str
+) -> Dict[str, Any]:
+    """
+    Delete a variable from a Blueprint.
+
+    Args:
+        unreal_connection: Connection to Unreal Engine
+        blueprint_name: Name of the Blueprint to modify
+        variable_name: Name of the variable to delete
+
+    Returns:
+        Dictionary with success status
+    """
+    try:
+        params = {
+            "blueprint_name": blueprint_name,
+            "variable_name": variable_name
+        }
+
+        response = unreal_connection.send_command("delete_variable", params)
+
+        if response.get("success"):
+            logger.info(
+                f"Successfully deleted variable '{variable_name}' from {blueprint_name}"
+            )
+        else:
+            logger.error(
+                f"Failed to delete variable: {response.get('error', 'Unknown error')}"
+            )
+
+        return response
+
+    except Exception as e:
+        logger.error(f"Exception in delete_variable: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
 def set_blueprint_variable_properties(
     unreal_connection,
     blueprint_name: str,

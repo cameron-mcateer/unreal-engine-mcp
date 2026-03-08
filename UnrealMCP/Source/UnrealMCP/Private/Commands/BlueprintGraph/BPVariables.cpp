@@ -428,6 +428,53 @@ TSharedPtr<FJsonObject> FBPVariables::SetVariableProperties(const TSharedPtr<FJs
     return Result;
 }
 
+TSharedPtr<FJsonObject> FBPVariables::DeleteVariable(const TSharedPtr<FJsonObject>& Params)
+{
+    TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+
+    FString BlueprintName = Params->GetStringField(TEXT("blueprint_name"));
+    FString VariableName = Params->GetStringField(TEXT("variable_name"));
+
+    UBlueprint* Blueprint = FEpicUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    if (!Blueprint)
+    {
+        Result->SetBoolField("success", false);
+        Result->SetStringField("error", FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+        return Result;
+    }
+
+    FName VarName = FName(*VariableName);
+
+    // Check that the variable exists
+    bool bFound = false;
+    for (const FBPVariableDescription& Var : Blueprint->NewVariables)
+    {
+        if (Var.VarName == VarName)
+        {
+            bFound = true;
+            break;
+        }
+    }
+
+    if (!bFound)
+    {
+        Result->SetBoolField("success", false);
+        Result->SetStringField("error", FString::Printf(TEXT("Variable not found: %s"), *VariableName));
+        return Result;
+    }
+
+    // RemoveMemberVariable handles graph node cleanup (VariableGet/Set nodes)
+    FBlueprintEditorUtils::RemoveMemberVariable(Blueprint, VarName);
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    FKismetEditorUtilities::CompileBlueprint(Blueprint);
+
+    Result->SetBoolField("success", true);
+    Result->SetStringField("variable_name", VariableName);
+    Result->SetStringField("message", FString::Printf(TEXT("Variable '%s' deleted successfully"), *VariableName));
+
+    return Result;
+}
+
 FEdGraphPinType FBPVariables::GetPinTypeFromString(const FString& TypeString, bool& bOutSuccess)
 {
     FEdGraphPinType PinType;

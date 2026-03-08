@@ -32,6 +32,9 @@ private:
     // Set variable properties in Blueprint (F19)
     TSharedPtr<FJsonObject> HandleSetVariableProperties(const TSharedPtr<FJsonObject>& Params);
 
+    // Delete variable from Blueprint
+    TSharedPtr<FJsonObject> HandleDeleteVariable(const TSharedPtr<FJsonObject>& Params);
+
     // Add event node to Blueprint graph
     TSharedPtr<FJsonObject> HandleAddEventNode(const TSharedPtr<FJsonObject>& Params);
 

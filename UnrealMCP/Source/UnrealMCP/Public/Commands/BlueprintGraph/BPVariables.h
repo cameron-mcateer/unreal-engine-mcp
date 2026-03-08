@@ -30,6 +30,13 @@ public:
      */
     static TSharedPtr<FJsonObject> SetVariableProperties(const TSharedPtr<FJsonObject>& Params);
 
+    /**
+     * Deletes a variable from a Blueprint
+     * @param Params JSON containing blueprint_name, variable_name
+     * @return JSON with success status
+     */
+    static TSharedPtr<FJsonObject> DeleteVariable(const TSharedPtr<FJsonObject>& Params);
+
 private:
     /**
      * Converts a type string to FEdGraphPinType.
