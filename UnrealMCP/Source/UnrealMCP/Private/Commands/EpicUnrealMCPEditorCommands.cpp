@@ -139,42 +139,64 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleSpawnActor(const TSh
         Scale = FEpicUnrealMCPCommonUtils::GetVectorFromJson(Params, TEXT("scale"));
     }
 
-    // Create the actor based on type
-    AActor* NewActor = nullptr;
-    UWorld* World = GEditor->GetEditorWorldContext().World();
-
-    if (!World)
-    {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get editor world"));
-    }
-
-    // Check if an actor with this name already exists
-    TArray<AActor*> AllActors;
-    UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-    for (AActor* Actor : AllActors)
-    {
-        if (Actor && Actor->GetName() == ActorName)
-        {
-            return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor with name '%s' already exists"), *ActorName));
-        }
-    }
-
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.Name = *ActorName;
-
+    // Resolve the actor class from the type string
+    UClass* ActorClass = nullptr;
     if (ActorType == TEXT("StaticMeshActor"))
     {
-        AStaticMeshActor* NewMeshActor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), Location, Rotation, SpawnParams);
-        if (NewMeshActor)
+        ActorClass = AStaticMeshActor::StaticClass();
+    }
+    else if (ActorType == TEXT("PointLight"))
+    {
+        ActorClass = APointLight::StaticClass();
+    }
+    else if (ActorType == TEXT("SpotLight"))
+    {
+        ActorClass = ASpotLight::StaticClass();
+    }
+    else if (ActorType == TEXT("DirectionalLight"))
+    {
+        ActorClass = ADirectionalLight::StaticClass();
+    }
+    else if (ActorType == TEXT("CameraActor"))
+    {
+        ActorClass = ACameraActor::StaticClass();
+    }
+    else
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown actor type: %s"), *ActorType));
+    }
+
+    // Use editor subsystem so actors are registered with the level and persist on save
+    UEditorActorSubsystem* EditorActorSubsystem = GEditor->GetEditorSubsystem<UEditorActorSubsystem>();
+    if (!EditorActorSubsystem)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get UEditorActorSubsystem"));
+    }
+
+    AActor* NewActor = EditorActorSubsystem->SpawnActorFromClass(ActorClass, Location, Rotation);
+    if (!NewActor)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to create actor"));
+    }
+
+    NewActor->SetActorLabel(ActorName);
+
+    // Set scale
+    NewActor->SetActorScale3D(Scale);
+
+    // For StaticMeshActors, optionally assign a mesh
+    if (ActorType == TEXT("StaticMeshActor"))
+    {
+        FString MeshPath;
+        if (Params->TryGetStringField(TEXT("static_mesh"), MeshPath))
         {
-            // Check for an optional static_mesh parameter to assign a mesh
-            FString MeshPath;
-            if (Params->TryGetStringField(TEXT("static_mesh"), MeshPath))
+            AStaticMeshActor* MeshActor = Cast<AStaticMeshActor>(NewActor);
+            if (MeshActor)
             {
                 UStaticMesh* Mesh = Cast<UStaticMesh>(UEditorAssetLibrary::LoadAsset(MeshPath));
                 if (Mesh)
                 {
-                    NewMeshActor->GetStaticMeshComponent()->SetStaticMesh(Mesh);
+                    MeshActor->GetStaticMeshComponent()->SetStaticMesh(Mesh);
                 }
                 else
                 {
@@ -182,41 +204,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleSpawnActor(const TSh
                 }
             }
         }
-        NewActor = NewMeshActor;
-    }
-    else if (ActorType == TEXT("PointLight"))
-    {
-        NewActor = World->SpawnActor<APointLight>(APointLight::StaticClass(), Location, Rotation, SpawnParams);
-    }
-    else if (ActorType == TEXT("SpotLight"))
-    {
-        NewActor = World->SpawnActor<ASpotLight>(ASpotLight::StaticClass(), Location, Rotation, SpawnParams);
-    }
-    else if (ActorType == TEXT("DirectionalLight"))
-    {
-        NewActor = World->SpawnActor<ADirectionalLight>(ADirectionalLight::StaticClass(), Location, Rotation, SpawnParams);
-    }
-    else if (ActorType == TEXT("CameraActor"))
-    {
-        NewActor = World->SpawnActor<ACameraActor>(ACameraActor::StaticClass(), Location, Rotation, SpawnParams);
-    }
-    else
-    {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown actor type: %s"), *ActorType));
     }
 
-    if (NewActor)
-    {
-        // Set scale (since SpawnActor only takes location and rotation)
-        FTransform Transform = NewActor->GetTransform();
-        Transform.SetScale3D(Scale);
-        NewActor->SetActorTransform(Transform);
-
-        // Return the created actor's details
-        return FEpicUnrealMCPCommonUtils::ActorToJsonObject(NewActor, true);
-    }
-
-    return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to create actor"));
+    // Return the created actor's details
+    return FEpicUnrealMCPCommonUtils::ActorToJsonObject(NewActor, true);
 }
 
 TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleDeleteActor(const TSharedPtr<FJsonObject>& Params)

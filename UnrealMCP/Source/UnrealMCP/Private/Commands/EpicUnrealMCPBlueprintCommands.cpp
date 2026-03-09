@@ -30,6 +30,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
+#include "Subsystems/EditorActorSubsystem.h"
 
 FEpicUnrealMCPBlueprintCommands::FEpicUnrealMCPBlueprintCommands()
 {
@@ -624,42 +625,31 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleSpawnBlueprintAct
         UE_LOG(LogTemp, Warning, TEXT("HandleSpawnBlueprintActor: Rotation set to (%f, %f, %f)"), Rotation.Pitch, Rotation.Yaw, Rotation.Roll);
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("HandleSpawnBlueprintActor: Getting editor world"));
-
-    // Spawn the actor
-    UWorld* World = GEditor->GetEditorWorldContext().World();
-    if (!World)
+    // Use editor subsystem so actors are registered with the level and persist on save
+    UEditorActorSubsystem* EditorActorSubsystem = GEditor->GetEditorSubsystem<UEditorActorSubsystem>();
+    if (!EditorActorSubsystem)
     {
-        UE_LOG(LogTemp, Error, TEXT("HandleSpawnBlueprintActor: Failed to get editor world"));
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get editor world"));
+        UE_LOG(LogTemp, Error, TEXT("HandleSpawnBlueprintActor: Failed to get UEditorActorSubsystem"));
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get UEditorActorSubsystem"));
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("HandleSpawnBlueprintActor: Creating spawn transform"));
+    if (!Blueprint->GeneratedClass)
+    {
+        UE_LOG(LogTemp, Error, TEXT("HandleSpawnBlueprintActor: Blueprint '%s' has no GeneratedClass — is it compiled?"), *BlueprintName);
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint '%s' has no GeneratedClass — compile it first"), *BlueprintName));
+    }
 
-    FTransform SpawnTransform;
-    SpawnTransform.SetLocation(Location);
-    SpawnTransform.SetRotation(FQuat(Rotation));
+    UE_LOG(LogTemp, Warning, TEXT("HandleSpawnBlueprintActor: Spawning via EditorActorSubsystem, GeneratedClass: %s"),
+           *Blueprint->GeneratedClass->GetName());
 
-    // Add a small delay to allow the engine to process the newly compiled class
-    FPlatformProcess::Sleep(0.2f);
+    TSubclassOf<AActor> ActorClass = *Blueprint->GeneratedClass;
+    AActor* NewActor = EditorActorSubsystem->SpawnActorFromClass(ActorClass, Location, Rotation);
 
-    UE_LOG(LogTemp, Warning, TEXT("HandleSpawnBlueprintActor: About to spawn actor from blueprint '%s' with GeneratedClass: %s"), 
-           *BlueprintName, Blueprint->GeneratedClass ? *Blueprint->GeneratedClass->GetName() : TEXT("NULL"));
-
-    AActor* NewActor = World->SpawnActor<AActor>(Blueprint->GeneratedClass, SpawnTransform);
-    
-    UE_LOG(LogTemp, Warning, TEXT("HandleSpawnBlueprintActor: SpawnActor completed, NewActor: %s"), 
-           NewActor ? *NewActor->GetName() : TEXT("NULL"));
-    
     if (NewActor)
     {
-        UE_LOG(LogTemp, Warning, TEXT("HandleSpawnBlueprintActor: Setting actor label to '%s'"), *ActorName);
         NewActor->SetActorLabel(*ActorName);
-        
-        UE_LOG(LogTemp, Warning, TEXT("HandleSpawnBlueprintActor: About to convert actor to JSON"));
+
         TSharedPtr<FJsonObject> Result = FEpicUnrealMCPCommonUtils::ActorToJsonObject(NewActor, true);
-        
-        UE_LOG(LogTemp, Warning, TEXT("HandleSpawnBlueprintActor: JSON conversion completed, returning result"));
         return Result;
     }
 
@@ -839,18 +829,42 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleSetMeshMaterialCo
         }
     }
 
-    // Create a dynamic material instance
-    UMaterialInstanceDynamic* DynMaterial = UMaterialInstanceDynamic::Create(Material, PrimComponent);
-    if (!DynMaterial)
+    // Create a persistent MaterialInstanceConstant asset (MIDs are runtime-only and can't be serialized)
+    FString ParentMaterialName = Material->GetName();
+    FString MICName = FString::Printf(TEXT("MI_%s_%s"), *BlueprintName, *ParentMaterialName);
+    FString MICPackagePath = FString::Printf(TEXT("/Game/Materials/%s"), *MICName);
+
+    // Check if the material instance already exists
+    UMaterialInstanceConstant* MatInstance = Cast<UMaterialInstanceConstant>(UEditorAssetLibrary::LoadAsset(MICPackagePath));
+
+    if (!MatInstance)
     {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to create dynamic material instance"));
+        // Create the package and asset
+        UPackage* MICPackage = CreatePackage(*MICPackagePath);
+        if (!MICPackage)
+        {
+            return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to create package for material instance"));
+        }
+
+        MatInstance = NewObject<UMaterialInstanceConstant>(MICPackage, *MICName, RF_Public | RF_Standalone);
+        if (!MatInstance)
+        {
+            return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to create material instance"));
+        }
+
+        MatInstance->Parent = Material;
+        FAssetRegistryModule::AssetCreated(MatInstance);
+        MICPackage->MarkPackageDirty();
     }
 
     // Set the color parameter
-    DynMaterial->SetVectorParameterValue(*ParameterName, Color);
+    MatInstance->SetVectorParameterValueEditorOnly(FMaterialParameterInfo(*ParameterName), Color);
+
+    // Save the material instance asset
+    UEditorAssetLibrary::SaveAsset(MICPackagePath, false);
 
     // Apply the material to the component
-    PrimComponent->SetMaterial(MaterialSlot, DynMaterial);
+    PrimComponent->SetMaterial(MaterialSlot, MatInstance);
 
     // Mark the blueprint as modified
     FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
