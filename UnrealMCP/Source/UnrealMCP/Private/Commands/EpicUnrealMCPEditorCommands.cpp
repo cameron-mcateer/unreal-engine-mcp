@@ -21,6 +21,8 @@
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "EditorAssetLibrary.h"
+#include "Engine/DataTable.h"
+#include "DataTableUtils.h"
 #include "Commands/EpicUnrealMCPBlueprintCommands.h"
 
 FEpicUnrealMCPEditorCommands::FEpicUnrealMCPEditorCommands()
@@ -55,7 +57,12 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleCommand(const FStrin
     {
         return HandleSpawnBlueprintActor(Params);
     }
-    
+    // DataTable commands
+    else if (CommandType == TEXT("read_data_table"))
+    {
+        return HandleReadDataTable(Params);
+    }
+
     return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown editor command: %s"), *CommandType));
 }
 
@@ -297,4 +304,95 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleSpawnBlueprintActor(
     // This function will now correctly call the implementation in BlueprintCommands
     FEpicUnrealMCPBlueprintCommands BlueprintCommands;
     return BlueprintCommands.HandleCommand(TEXT("spawn_blueprint_actor"), Params);
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleReadDataTable(const TSharedPtr<FJsonObject>& Params)
+{
+    FString DataTablePath;
+    if (!Params->TryGetStringField(TEXT("data_table_path"), DataTablePath))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'data_table_path' parameter"));
+    }
+
+    UObject* LoadedAsset = UEditorAssetLibrary::LoadAsset(DataTablePath);
+    if (!LoadedAsset)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Asset not found: %s"), *DataTablePath));
+    }
+
+    UDataTable* DataTable = Cast<UDataTable>(LoadedAsset);
+    if (!DataTable)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Asset is not a DataTable: %s"), *DataTablePath));
+    }
+
+    // Get row struct info
+    const UScriptStruct* RowStruct = DataTable->GetRowStruct();
+    FString RowStructName = RowStruct ? RowStruct->GetName() : TEXT("Unknown");
+
+    // Check if a specific row was requested
+    FString RowName;
+    bool bSingleRow = Params->TryGetStringField(TEXT("row_name"), RowName);
+
+    if (bSingleRow)
+    {
+        // Find the specific row
+        uint8* const* RowDataPtr = DataTable->GetRowMap().Find(FName(*RowName));
+        if (!RowDataPtr)
+        {
+            return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Row not found: %s"), *RowName));
+        }
+
+        // Export just this row using property iteration
+        TSharedPtr<FJsonObject> RowObj = MakeShared<FJsonObject>();
+        if (RowStruct)
+        {
+            for (TFieldIterator<FProperty> PropIt(RowStruct); PropIt; ++PropIt)
+            {
+                FProperty* Property = *PropIt;
+                FString ValueStr;
+                Property->ExportTextItem_Direct(ValueStr, Property->ContainerPtrToValuePtr<void>(*RowDataPtr), nullptr, nullptr, PPF_None);
+                RowObj->SetStringField(Property->GetName(), ValueStr);
+            }
+        }
+
+        TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+        ResultObj->SetStringField(TEXT("data_table_path"), DataTablePath);
+        ResultObj->SetStringField(TEXT("row_struct"), RowStructName);
+        ResultObj->SetStringField(TEXT("row_name"), RowName);
+        ResultObj->SetObjectField(TEXT("row_data"), RowObj);
+        return ResultObj;
+    }
+
+    // Export the entire table as JSON and parse it back
+    FString JsonString = DataTable->GetTableAsJSON(EDataTableExportFlags::UseJsonObjectsForStructs);
+
+    TArray<TSharedPtr<FJsonValue>> ParsedRows;
+    TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
+    if (!FJsonSerializer::Deserialize(Reader, ParsedRows))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to serialize DataTable to JSON"));
+    }
+
+    // Build a map of row_name -> row_data using the Name field from each row
+    TSharedPtr<FJsonObject> RowsObj = MakeShared<FJsonObject>();
+    for (const TSharedPtr<FJsonValue>& RowValue : ParsedRows)
+    {
+        const TSharedPtr<FJsonObject>* RowObj;
+        if (RowValue->TryGetObject(RowObj))
+        {
+            FString Name;
+            if ((*RowObj)->TryGetStringField(TEXT("Name"), Name))
+            {
+                RowsObj->SetObjectField(Name, *RowObj);
+            }
+        }
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("data_table_path"), DataTablePath);
+    ResultObj->SetStringField(TEXT("row_struct"), RowStructName);
+    ResultObj->SetNumberField(TEXT("row_count"), DataTable->GetRowMap().Num());
+    ResultObj->SetObjectField(TEXT("rows"), RowsObj);
+    return ResultObj;
 }

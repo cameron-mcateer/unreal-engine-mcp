@@ -400,6 +400,96 @@ def add_input_action_event_node(
     )
 
 
+def add_property_get_node(
+    unreal_connection,
+    blueprint_name: str,
+    component_name: str,
+    property_name: str,
+    pos_x: float = 0,
+    pos_y: float = 0
+) -> Dict[str, Any]:
+    """
+    Add a Property Get node to read a UPROPERTY from a component.
+
+    Creates a K2Node_VariableGet configured with SetFromProperty, targeting
+    a property on a component class. The node has a Target pin that must be
+    connected to a component reference (e.g. via a VariableGet node).
+
+    Args:
+        unreal_connection: Connection to Unreal Engine
+        blueprint_name: Name of the Blueprint
+        component_name: Name of the component variable. For SCS components,
+            use the name from add_component_to_blueprint. For inherited components,
+            use the engine name (e.g. "CharacterMovement", "CapsuleComponent").
+        property_name: UPROPERTY name on the component class (e.g. "MaxWalkSpeed")
+        pos_x: X position in graph
+        pos_y: Y position in graph
+
+    Returns:
+        Dictionary containing node_id and status
+
+    Example:
+        >>> add_property_get_node(unreal, "BP_Character", "CharacterMovement",
+        ...     "MaxWalkSpeed", 200, 100)
+    """
+    return add_node(
+        unreal_connection,
+        blueprint_name,
+        "PropertyGet",
+        {
+            "pos_x": pos_x,
+            "pos_y": pos_y,
+            "component_name": component_name,
+            "property_name": property_name
+        }
+    )
+
+
+def add_property_set_node(
+    unreal_connection,
+    blueprint_name: str,
+    component_name: str,
+    property_name: str,
+    pos_x: float = 0,
+    pos_y: float = 0
+) -> Dict[str, Any]:
+    """
+    Add a Property Set node to write a UPROPERTY on a component.
+
+    Creates a K2Node_VariableSet configured with SetFromProperty, targeting
+    a property on a component class. The node has exec pins, a Target pin
+    (for the component reference), and a value input pin for the property.
+
+    Args:
+        unreal_connection: Connection to Unreal Engine
+        blueprint_name: Name of the Blueprint
+        component_name: Name of the component variable. For SCS components,
+            use the name from add_component_to_blueprint. For inherited components,
+            use the engine name (e.g. "CharacterMovement", "CapsuleComponent").
+        property_name: UPROPERTY name on the component class (e.g. "MaxWalkSpeed")
+        pos_x: X position in graph
+        pos_y: Y position in graph
+
+    Returns:
+        Dictionary containing node_id and status
+
+    Example:
+        >>> add_property_set_node(unreal, "BP_Character", "CharacterMovement",
+        ...     "MaxWalkSpeed", 300, 200)
+    """
+    return add_node(
+        unreal_connection,
+        blueprint_name,
+        "PropertySet",
+        {
+            "pos_x": pos_x,
+            "pos_y": pos_y,
+            "component_name": component_name,
+            "property_name": property_name
+        }
+    )
+
+
 def add_math_operator_node(
     unreal_connection,
     blueprint_name: str,

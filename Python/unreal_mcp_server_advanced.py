@@ -447,6 +447,33 @@ mcp = FastMCP(
     lifespan=server_lifespan
 )
 
+# DataTable Tools
+@mcp.tool()
+def read_data_table(data_table_path: str, row_name: str = None) -> Dict[str, Any]:
+    """Read row names and field values from a UDataTable asset.
+
+    Args:
+        data_table_path: Asset path to the DataTable (e.g. "/Game/Data/DT_Items")
+        row_name: Optional specific row name to read. If omitted, returns all rows.
+
+    Returns:
+        When row_name is None: {row_struct, row_count, rows: {RowName: {Field: Value, ...}, ...}}
+        When row_name is set: {row_struct, row_name, row_data: {Field: Value, ...}}
+    """
+    unreal = get_unreal_connection()
+    if not unreal:
+        return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+    try:
+        params = {"data_table_path": data_table_path}
+        if row_name is not None:
+            params["row_name"] = row_name
+        response = unreal.send_command("read_data_table", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"read_data_table error: {e}")
+        return {"success": False, "message": str(e)}
+
 # Essential Actor Management Tools
 @mcp.tool()
 def get_actors_in_level(random_string: str = "") -> Dict[str, Any]:
@@ -2176,17 +2203,18 @@ def add_node(
     pin_type: str = "",
     target_class: str = "",
     component_name: str = "",
-    input_action: str = ""
+    input_action: str = "",
+    property_name: str = ""
 ) -> Dict[str, Any]:
     """
     Add a node to a Blueprint graph.
 
     Create various types of K2Nodes in a Blueprint's event graph or function graph.
-    Supports 25 node types organized by category.
+    Supports 27 node types organized by category.
 
     Args:
         blueprint_name: Name of the Blueprint to modify
-        node_type: Type of node to create. Supported types (25 total):
+        node_type: Type of node to create. Supported types (27 total):
 
             CONTROL FLOW:
                 "Branch" - Conditional execution (if/then/else)
@@ -2206,6 +2234,26 @@ def add_node(
                 "VariableSet" - Set a variable value (⚠️ variable must exist and be assignable)
                 "MakeArray" - Create array from individual inputs
                     ℹ️ Creates 1 pin at creation; add/remove via set_node_property with action="set_num_elements"
+
+            PROPERTY ACCESS (component/object properties — NOT Blueprint variables):
+                "PropertyGet" - Read a UPROPERTY from a component or object.
+                    Creates a K2Node_VariableGet with a Target pin for the object reference.
+                    Requires property_name= and either component_name= or target_class=.
+                    component_name works for both SCS components and inherited C++ components
+                    (e.g. "CharacterMovement", "CapsuleComponent", "Mesh").
+                    target_class accepts class names (e.g. "CharacterMovementComponent").
+                    ⚠️ Connect a VariableGet node for the component to the Target pin.
+                    Examples: MaxWalkSpeed, GravityScale, JumpZVelocity on CharacterMovement;
+                              TargetArmLength on SpringArm; Intensity on lights.
+                "PropertySet" - Write a UPROPERTY on a component or object.
+                    Creates a K2Node_VariableSet with a Target pin, exec pins, and value pin.
+                    Requires property_name= and either component_name= or target_class=.
+                    component_name works for both SCS components and inherited C++ components.
+                    target_class accepts class names (e.g. "CharacterMovementComponent").
+                    ⚠️ Connect a VariableGet node for the component to the Target pin.
+                    Pins: execute, Target (component ref), <PropertyName> (value), then (exec out)
+                    Examples: Set MaxWalkSpeed, GravityScale, JumpZVelocity on CharacterMovement;
+                              TargetArmLength on SpringArm; Intensity on lights.
 
             CASTING:
                 "DynamicCast" - Cast object to specific class (⚠️ requires target_class; handle "Cast Failed" output)
@@ -2300,11 +2348,21 @@ def add_node(
                       (e.g. "/Game/Blueprints/BP_Foo.BP_Foo_C" or "ACharacter_C").
                       Required for DynamicCast and ClassDynamicCast — omitting it
                       creates a non-functional wildcard cast node.
-        component_name: For ComponentEvent nodes, the name of the component in the Blueprint
-                        (as passed to add_component_to_blueprint). Required for ComponentEvent.
+                      For PropertyGet/PropertySet nodes, optional alternative to component_name.
+                      Accepts native class names (e.g. "CharacterMovementComponent").
+        component_name: For ComponentEvent and PropertyGet/PropertySet nodes, the name of the
+                        component variable. For SCS components, use the name passed to
+                        add_component_to_blueprint. For inherited C++ components, use the UPROPERTY
+                        variable name from the parent class (e.g. "CharacterMovement",
+                        "CapsuleComponent", "Mesh", "ArrowComponent").
+                        Required for ComponentEvent. For PropertyGet/PropertySet, provide either
+                        component_name or target_class.
         input_action: For InputActionEvent nodes, the asset path to the UInputAction
                       (e.g. "/Game/Input/IA_Attack"). Required for InputActionEvent.
                       Create the asset first with create_input_action tool.
+        property_name: For PropertyGet/PropertySet nodes, the UPROPERTY name on the component class
+                       (e.g. "MaxWalkSpeed", "GravityScale", "JumpZVelocity", "TargetArmLength").
+                       Required for PropertyGet and PropertySet.
 
     Returns:
         Dictionary with success status, node_id, and position
@@ -2323,6 +2381,10 @@ def add_node(
         return {"success": False, "error": "ComponentEvent requires event_type"}
     if node_type == "InputActionEvent" and not input_action:
         return {"success": False, "error": "InputActionEvent requires input_action"}
+    if node_type in ("PropertyGet", "PropertySet") and not component_name and not target_class:
+        return {"success": False, "error": f"{node_type} requires component_name or target_class"}
+    if node_type in ("PropertyGet", "PropertySet") and not property_name:
+        return {"success": False, "error": f"{node_type} requires property_name"}
 
     unreal = get_unreal_connection()
     if not unreal:
@@ -2356,6 +2418,8 @@ def add_node(
             node_params["component_name"] = component_name
         if input_action:
             node_params["input_action"] = input_action
+        if property_name:
+            node_params["property_name"] = property_name
 
         result = node_manager.add_node(
             unreal,
