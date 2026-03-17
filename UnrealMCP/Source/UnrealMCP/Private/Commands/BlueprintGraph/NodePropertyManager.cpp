@@ -405,6 +405,147 @@ TSharedPtr<FJsonObject> FNodePropertyManager::DispatchEditAction(
 		return Response;
 	}
 
+	// === ANY NODE: Split a struct pin into individual member pins ===
+	if (Action.Equals(TEXT("split_struct_pin"), ESearchCase::IgnoreCase))
+	{
+		FString PinName;
+		if (!Params->TryGetStringField(TEXT("pin_name"), PinName))
+		{
+			return CreateErrorResponse(TEXT("split_struct_pin requires 'pin_name' parameter"));
+		}
+
+		UEdGraphPin* Pin = Node->FindPin(FName(*PinName));
+		if (!Pin)
+		{
+			// List available pins for the error message
+			TArray<FString> PinNames;
+			for (UEdGraphPin* NodePin : Node->Pins)
+			{
+				if (NodePin)
+				{
+					PinNames.Add(FString::Printf(TEXT("%s (%s)"),
+						*NodePin->GetName(),
+						NodePin->Direction == EGPD_Input ? TEXT("input") : TEXT("output")));
+				}
+			}
+			FString AvailablePins = FString::Join(PinNames, TEXT(", "));
+			return CreateErrorResponse(FString::Printf(
+				TEXT("Pin '%s' not found on node. Available pins: [%s]"),
+				*PinName, *AvailablePins));
+		}
+
+		// Check if the node supports splitting this pin
+		if (!Node->CanSplitPin(Pin))
+		{
+			return CreateErrorResponse(FString::Printf(
+				TEXT("Pin '%s' cannot be split (not a struct pin or splitting not supported)"),
+				*PinName));
+		}
+
+		// Check if already split
+		if (Pin->SubPins.Num() > 0)
+		{
+			return CreateErrorResponse(FString::Printf(
+				TEXT("Pin '%s' is already split into %d sub-pins"),
+				*PinName, Pin->SubPins.Num()));
+		}
+
+		const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
+		Schema->SplitPin(Pin, /*bNotify=*/ true);
+
+		// Collect the resulting sub-pin names
+		TArray<TSharedPtr<FJsonValue>> SubPinArray;
+		for (UEdGraphPin* SubPin : Pin->SubPins)
+		{
+			if (SubPin)
+			{
+				TSharedPtr<FJsonObject> SubPinObj = MakeShareable(new FJsonObject);
+				SubPinObj->SetStringField(TEXT("name"), SubPin->GetName());
+				SubPinObj->SetStringField(TEXT("direction"),
+					SubPin->Direction == EGPD_Input ? TEXT("input") : TEXT("output"));
+				SubPinObj->SetStringField(TEXT("type"), SubPin->PinType.PinCategory.ToString());
+				SubPinArray.Add(MakeShareable(new FJsonValueObject(SubPinObj)));
+			}
+		}
+
+		Graph->NotifyGraphChanged();
+		UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForGraph(Graph);
+		if (Blueprint)
+		{
+			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+		}
+
+		TSharedPtr<FJsonObject> Response = MakeShareable(new FJsonObject);
+		Response->SetBoolField(TEXT("success"), true);
+		Response->SetStringField(TEXT("action"), TEXT("split_struct_pin"));
+		Response->SetStringField(TEXT("pin_name"), PinName);
+		Response->SetArrayField(TEXT("sub_pins"), SubPinArray);
+		return Response;
+	}
+
+	// === ANY NODE: Recombine a previously split struct pin ===
+	if (Action.Equals(TEXT("recombine_struct_pin"), ESearchCase::IgnoreCase))
+	{
+		FString PinName;
+		if (!Params->TryGetStringField(TEXT("pin_name"), PinName))
+		{
+			return CreateErrorResponse(TEXT("recombine_struct_pin requires 'pin_name' parameter"));
+		}
+
+		UEdGraphPin* Pin = Node->FindPin(FName(*PinName));
+		if (!Pin)
+		{
+			// Also try to find a sub-pin — user might pass a sub-pin name
+			// In that case, we need to recombine the parent
+			for (UEdGraphPin* NodePin : Node->Pins)
+			{
+				if (NodePin)
+				{
+					for (UEdGraphPin* SubPin : NodePin->SubPins)
+					{
+						if (SubPin && SubPin->GetName() == PinName)
+						{
+							Pin = NodePin;
+							break;
+						}
+					}
+					if (Pin) break;
+				}
+			}
+
+			if (!Pin)
+			{
+				return CreateErrorResponse(FString::Printf(
+					TEXT("Pin '%s' not found on node (searched pins and sub-pins)"),
+					*PinName));
+			}
+		}
+
+		// If it has no sub-pins, it's not split
+		if (Pin->SubPins.Num() == 0)
+		{
+			return CreateErrorResponse(FString::Printf(
+				TEXT("Pin '%s' is not currently split"),
+				*PinName));
+		}
+
+		const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
+		Schema->RecombinePin(Pin);
+
+		Graph->NotifyGraphChanged();
+		UBlueprint* Blueprint = FBlueprintEditorUtils::FindBlueprintForGraph(Graph);
+		if (Blueprint)
+		{
+			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+		}
+
+		TSharedPtr<FJsonObject> Response = MakeShareable(new FJsonObject);
+		Response->SetBoolField(TEXT("success"), true);
+		Response->SetStringField(TEXT("action"), TEXT("recombine_struct_pin"));
+		Response->SetStringField(TEXT("pin_name"), Pin->GetName());
+		return Response;
+	}
+
 	// === ANY NODE: Set default value on an input pin by name ===
 	if (Action.Equals(TEXT("set_pin_default"), ESearchCase::IgnoreCase))
 	{

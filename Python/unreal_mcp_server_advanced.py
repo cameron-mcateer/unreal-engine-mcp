@@ -2941,6 +2941,12 @@ def set_node_property(
                 - "add_pin": Add a pin to a node (requires pin_type)
                 - "remove_pin": Remove a pin from a node (requires pin_name)
                 - "set_enum_type": Set enum type on a node (requires enum_type)
+                - "split_struct_pin": Split a struct pin into individual member pins (requires pin_name).
+                  Use this to access individual struct fields (e.g. split GetDataTableRow's ReturnValue
+                  to access BaseDamage, MaxDurability, etc.). After splitting, use the sub-pin names
+                  with connect_nodes.
+                - "recombine_struct_pin": Recombine a previously split struct pin (requires pin_name).
+                  Pass the parent pin name or any sub-pin name.
             Phase 2 (Type Modification):
                 - "set_pin_type": Change pin type on comparison nodes (requires pin_name, new_type)
                 - "set_value_type": Change value type on select nodes (requires new_type)
@@ -2991,6 +2997,16 @@ def set_node_property(
                 action="set_enum_type",
                 enum_type="ECardinalDirection"
             )
+
+        Semantic mode (split struct pin to access individual fields):
+            set_node_property(
+                blueprint_name="BP_CombatCharacter",
+                node_id="K2Node_GetDataTableRow_0",
+                action="split_struct_pin",
+                pin_name="ReturnValue"
+            )
+            # After splitting, connect individual member pins:
+            # connect_nodes(..., source_pin_name="ReturnValue_BaseDamage", ...)
 
         Semantic mode (change function call):
             set_node_property(

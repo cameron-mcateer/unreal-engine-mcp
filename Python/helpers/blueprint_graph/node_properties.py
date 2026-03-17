@@ -839,3 +839,76 @@ def set_event_type(
         function_name=function_name,
         event_type=event_type
     )
+
+
+def split_struct_pin(
+    unreal_connection,
+    blueprint_name: str,
+    node_id: str,
+    pin_name: str,
+    function_name: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Split a struct pin into its individual member pins.
+
+    This is the programmatic equivalent of right-clicking a struct pin in the Blueprint
+    editor and selecting "Split Struct Pin". After splitting, individual member pins
+    (e.g. BaseDamage, MaxDurability) become available for wiring with connect_nodes.
+
+    Common use cases:
+        - Accessing individual fields from GetDataTableRow struct output
+        - Breaking apart Make/Break struct pins
+        - Splitting Hit Result output pins into individual components
+
+    Args:
+        unreal_connection: Connection to Unreal Engine
+        blueprint_name: Name of the Blueprint
+        node_id: ID of the node containing the struct pin
+        pin_name: Name of the struct pin to split (e.g. "ReturnValue", "OutRow")
+        function_name: Name of function graph (None = EventGraph)
+
+    Returns:
+        Dictionary with success status and list of created sub_pins
+        (each with name, direction, and type)
+    """
+    return set_node_property(
+        unreal_connection,
+        blueprint_name,
+        node_id,
+        action="split_struct_pin",
+        function_name=function_name,
+        pin_name=pin_name
+    )
+
+
+def recombine_struct_pin(
+    unreal_connection,
+    blueprint_name: str,
+    node_id: str,
+    pin_name: str,
+    function_name: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Recombine a previously split struct pin back into a single struct pin.
+
+    Reverses the effect of split_struct_pin. You can pass either the original
+    parent pin name or any sub-pin name — the parent will be found automatically.
+
+    Args:
+        unreal_connection: Connection to Unreal Engine
+        blueprint_name: Name of the Blueprint
+        node_id: ID of the node containing the split pin
+        pin_name: Name of the parent pin or any sub-pin to recombine
+        function_name: Name of function graph (None = EventGraph)
+
+    Returns:
+        Dictionary with success status
+    """
+    return set_node_property(
+        unreal_connection,
+        blueprint_name,
+        node_id,
+        action="recombine_struct_pin",
+        function_name=function_name,
+        pin_name=pin_name
+    )
