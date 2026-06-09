@@ -164,6 +164,18 @@ result = await send_unreal_command("AddNode", {
 - **Gameplay systems**: Collision preset management, input action/axis binding, game mode/state manipulation, Widget/UMG creation
 - **Editor operations**: Content browser operations, viewport camera control, Play-In-Editor automation, package/build automation
 
+## TODO Tracking
+
+Work items live in `TODO.md` (index) plus one detail file per item in `TODO/<item-id>.md`.
+
+- **Item ids** contain only `a-z`, `0-9`, and `-`, and double as the detail filename.
+- **`TODO.md` is the source of truth for priority**: items are ordered highest-priority first. Each entry is a single checkbox line — `- [ ] **<item-id>** — one-line summary` — optionally followed by indented attribute sub-bullets:
+  - `depends on: <item-id>` — this item must not be started, or re-ordered to run, before the listed item.
+  - `pairs with: <item-id>` — best landed together, but neither blocks the other.
+- **Detail files** (`TODO/<item-id>.md`) hold everything else: a `## Problem` section with `file:line` references, a `## Fix` section, and `## Acceptance` criteria. Do **not** put priority ranks in detail files — priority is expressed only by ordering in `TODO.md`.
+
+When adding an item: create `TODO/<item-id>.md` first, then insert its line into `TODO.md` at the right priority position (never above anything it depends on). When completing an item: remove its line from `TODO.md` and delete its detail file — completed items live in git history, not in the list. Also remove any `depends on:` / `pairs with:` references to the completed item from remaining entries.
+
 ## Logs & Debugging
 
 - Server log: `Python/unreal_mcp_advanced.log`
