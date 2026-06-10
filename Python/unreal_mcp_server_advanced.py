@@ -209,91 +209,65 @@ class UnrealConnection:
 
     def _receive_response(self, command_type: str) -> bytes:
         """
-        Receive complete JSON response from Unreal.
-        
+        Receive one newline-terminated JSON response from Unreal.
+
+        The plugin frames each response as a single line of condensed JSON
+        followed by '\\n', so read until the newline arrives. An editor hitch
+        mid-response just delays the newline; a truncated response never
+        produces one and times out instead of being mistaken for complete.
+
         Args:
             command_type: Type of command (used for timeout selection)
-            
+
         Returns:
-            Raw response bytes
-            
+            Raw response bytes (without the trailing newline)
+
         Raises:
-            Exception: On timeout or connection error
+            TimeoutError: If no complete response arrives in time
+            ConnectionError: If the connection closes mid-response
         """
         timeout = self._get_timeout_for_command(command_type)
         self.socket.settimeout(timeout)
-        
-        chunks = []
-        total_bytes = 0
+
+        buffer = b''
         start_time = time.time()
-        
-        try:
-            while True:
-                # Check for overall timeout
-                elapsed = time.time() - start_time
-                if elapsed > timeout:
-                    raise socket.timeout(f"Overall timeout after {elapsed:.1f}s")
-                
-                try:
-                    chunk = self.socket.recv(self.BUFFER_SIZE)
-                except socket.timeout:
-                    # Check if we have a complete response
-                    if chunks:
-                        data = b''.join(chunks)
-                        try:
-                            json.loads(data.decode('utf-8'))
-                            logger.info(f"Got complete response after recv timeout ({total_bytes} bytes)")
-                            return data
-                        except json.JSONDecodeError:
-                            pass
-                    raise
-                
-                if not chunk:
-                    # Connection closed by remote
-                    if not chunks:
-                        raise ConnectionError("Connection closed before receiving any data")
-                    break
-                
-                chunks.append(chunk)
-                total_bytes += len(chunk)
-                
-                # Try to parse accumulated data as JSON
-                data = b''.join(chunks)
-                try:
-                    decoded = data.decode('utf-8')
-                    json.loads(decoded)
-                    # Successfully parsed - we have complete response
-                    logger.info(f"Received complete response ({total_bytes} bytes) for {command_type}")
-                    return data
-                except json.JSONDecodeError:
-                    # Incomplete JSON, continue reading
-                    continue
-                except UnicodeDecodeError:
-                    # Incomplete UTF-8, continue reading
-                    continue
-                    
-        except socket.timeout:
+
+        while True:
             elapsed = time.time() - start_time
-            if chunks:
-                data = b''.join(chunks)
-                try:
-                    json.loads(data.decode('utf-8'))
-                    logger.warning(f"Using response received before timeout ({total_bytes} bytes)")
-                    return data
-                except:
-                    pass
-            raise TimeoutError(f"Timeout after {elapsed:.1f}s waiting for response to {command_type} (received {total_bytes} bytes)")
-        
-        # If we get here, connection was closed
-        if chunks:
-            data = b''.join(chunks)
+            if elapsed > timeout:
+                raise TimeoutError(f"Timeout after {elapsed:.1f}s waiting for response to {command_type} (received {len(buffer)} bytes)")
+
             try:
-                json.loads(data.decode('utf-8'))
+                chunk = self.socket.recv(self.BUFFER_SIZE)
+            except socket.timeout:
+                # Compatibility fallback: a plugin built before newline framing
+                # sends no terminator, so accept a buffer that already parses.
+                if buffer:
+                    try:
+                        json.loads(buffer.decode('utf-8'))
+                        logger.warning(f"Response had no newline terminator ({len(buffer)} bytes) - plugin predates newline framing, accepting parseable JSON")
+                        return buffer
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        pass
+                elapsed = time.time() - start_time
+                raise TimeoutError(f"Timeout after {elapsed:.1f}s waiting for response to {command_type} (received {len(buffer)} bytes)")
+
+            if not chunk:
+                # Connection closed by remote
+                if not buffer:
+                    raise ConnectionError("Connection closed before receiving any data")
+                raise ConnectionError(f"Connection closed with incomplete data ({len(buffer)} bytes)")
+
+            buffer += chunk
+
+            newline_index = buffer.find(b'\n')
+            if newline_index != -1:
+                data = buffer[:newline_index]
+                extra = buffer[newline_index + 1:]
+                if extra.strip():
+                    logger.warning(f"Discarding {len(extra)} unexpected bytes after response terminator")
+                logger.info(f"Received complete response ({len(data)} bytes) for {command_type}")
                 return data
-            except:
-                raise ConnectionError(f"Connection closed with incomplete data ({total_bytes} bytes)")
-        
-        raise ConnectionError("Connection closed without response")
 
     def send_command(self, command: str, params: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
         """
@@ -363,10 +337,10 @@ class UnrealConnection:
                 
                 logger.info(f"Sending command (attempt {attempt + 1}): {command}")
                 logger.debug(f"Command payload: {command_json[:500]}...")
-                
-                # Send with timeout
+
+                # Send with timeout; commands are newline-delimited on the wire
                 self.socket.settimeout(10)  # 10 second send timeout
-                self.socket.sendall(command_json.encode('utf-8'))
+                self.socket.sendall((command_json + "\n").encode('utf-8'))
                 
                 # Receive response
                 response_data = self._receive_response(command)

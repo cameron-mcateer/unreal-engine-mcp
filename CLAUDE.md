@@ -81,13 +81,13 @@ UnrealMCP C++ plugin
             NodeManager → per-type creator classes (ControlFlowNodes, MathNodes, …)
 ```
 
-**Wire format** — Python sends:
+**Wire format** — newline-delimited JSON in both directions: each message is one line of condensed JSON terminated by `\n`. Python sends:
 ```json
-{"command": "CommandName", "params": { … }}
+{"type": "CommandName", "params": { … }}
 ```
-C++ responds:
+(C++ also accepts `"command"` as an alias for `"type"`.) C++ responds:
 ```json
-{"success": true, "data": { … }}   // or {"success": false, "error": "…"}
+{"status": "success", "result": { … }}   // or {"status": "error", "error": "…"}
 ```
 
 Timeouts: 30 s default; 300 s for large ops (`create_town`, `create_castle_fortress`, `create_suspension_bridge`, `create_aqueduct`, `construct_mansion`, `create_maze`).

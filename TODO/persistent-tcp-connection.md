@@ -1,6 +1,6 @@
 # persistent-tcp-connection
 
-**Depends on:** `fix-cpp-message-framing`. Do `socket-cleanup-on-disconnect` alongside.
+Do `socket-cleanup-on-disconnect` alongside.
 
 ## Problem
 
@@ -10,7 +10,7 @@ Python opens and tears down a TCP connection for **every command**: `_send_comma
 
 1. **Python:** Keep the socket open across commands. Reconnect only on send/recv failure (the retry/backoff logic in `send_command` already handles this). Remove the `finally: _close_socket_unsafe()`.
 2. **C++:** Replace the 0.1s polling accept with a blocking accept or `FSocket::Wait`-based loop so reconnects are picked up promptly.
-3. Requires real framing first (`fix-cpp-message-framing`) since multiple commands can now share a connection and arrive back-to-back in one segment.
+3. The wire protocol is already newline-framed in both directions, so back-to-back commands sharing one connection/segment are handled.
 4. Do `socket-cleanup-on-disconnect` alongside — with persistent connections, a dead-but-unclosed client must not lock out the single-client server.
 
 ## Acceptance

@@ -1,7 +1,5 @@
 # add-spawn-actors-batch
 
-**Depends on:** `fix-cpp-message-framing` (batch payloads exceed the current 8KB single-recv limit).
-
 ## Problem
 
 Every helper spawns one actor per TCP command. A castle is ~800–1000 sequential `spawn_actor` calls (`Python/helpers/castle_creation.py:73-165` etc.), a mansion ~500–700, a town more. Each call pays a fresh TCP connection plus a ~50ms average accept-poll delay on the C++ side (see `persistent-tcp-connection`). This is why the 300-second timeout tier exists for `create_town` / `create_castle_fortress` / etc. — most of that time is protocol overhead, not Unreal work.
@@ -14,7 +12,6 @@ Every helper spawns one actor per TCP command. A castle is ~800–1000 sequentia
 
 ## Notes
 
-- Combine with `fix-cpp-message-framing` first — batch request payloads will far exceed the current 8KB single-recv limit.
 - After this lands, the 300s `LARGE_OPERATION_COMMANDS` timeout tier can likely be reduced or removed.
 
 ## Acceptance
