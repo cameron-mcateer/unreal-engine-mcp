@@ -40,6 +40,7 @@ from helpers.actor_utilities import spawn_blueprint_actor, get_blueprint_materia
 from helpers.actor_name_manager import (
     safe_spawn_actor, safe_delete_actor
 )
+from helpers.spawn_summary import summarize_spawned_actors
 from helpers.bridge_aqueduct_creation import (
     build_suspension_bridge_structure, build_aqueduct_structure
 )
@@ -449,15 +450,17 @@ mcp = FastMCP(
 
 # DataTable Tools
 @mcp.tool()
-def read_data_table(data_table_path: str, row_name: str = None) -> Dict[str, Any]:
+def read_data_table(data_table_path: str, row_name: str = None, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
     """Read row names and field values from a UDataTable asset.
 
     Args:
         data_table_path: Asset path to the DataTable (e.g. "/Game/Data/DT_Items")
-        row_name: Optional specific row name to read. If omitted, returns all rows.
+        row_name: Optional specific row name to read. If omitted, returns rows paginated by limit/offset.
+        limit: Maximum number of rows to return when reading all rows (0 = no limit)
+        offset: Number of rows to skip when reading all rows
 
     Returns:
-        When row_name is None: {row_struct, row_count, rows: {RowName: {Field: Value, ...}, ...}}
+        When row_name is None: {row_struct, row_count, returned_rows, offset, rows: {RowName: {Field: Value, ...}, ...}}
         When row_name is set: {row_struct, row_name, row_data: {Field: Value, ...}}
     """
     unreal = get_unreal_connection()
@@ -469,36 +472,87 @@ def read_data_table(data_table_path: str, row_name: str = None) -> Dict[str, Any
         if row_name is not None:
             params["row_name"] = row_name
         response = unreal.send_command("read_data_table", params)
-        return response or {"success": False, "message": "No response from Unreal"}
+        if not response:
+            return {"success": False, "message": "No response from Unreal"}
+        result = response.get("result")
+        if row_name is None and isinstance(result, dict) and isinstance(result.get("rows"), dict):
+            rows = result["rows"]
+            row_names = list(rows.keys())
+            page = row_names[offset:offset + limit] if limit > 0 else row_names[offset:]
+            result["rows"] = {name: rows[name] for name in page}
+            result["returned_rows"] = len(page)
+            result["offset"] = offset
+        return response
     except Exception as e:
         logger.error(f"read_data_table error: {e}")
         return {"success": False, "message": str(e)}
 
 # Essential Actor Management Tools
 @mcp.tool()
-def get_actors_in_level(random_string: str = "") -> Dict[str, Any]:
-    """Get a list of all actors in the current level."""
+def get_actors_in_level(limit: int = 50, offset: int = 0, random_string: str = "") -> Dict[str, Any]:
+    """Get a paginated list of actors in the current level.
+
+    Args:
+        limit: Maximum number of actors to return (0 = no limit)
+        offset: Number of actors to skip from the start of the list
+
+    Returns:
+        {total_actors, offset, returned, actors: [{name, class, location, ...}, ...]}
+    """
     unreal = get_unreal_connection()
     if not unreal:
         return {"success": False, "message": "Failed to connect to Unreal Engine"}
-    
+
     try:
         response = unreal.send_command("get_actors_in_level", {})
-        return response or {"success": False, "message": "No response from Unreal"}
+        if not response:
+            return {"success": False, "message": "No response from Unreal"}
+        if response.get("status") != "success":
+            return response
+        actors = response.get("result", {}).get("actors", [])
+        page = actors[offset:offset + limit] if limit > 0 else actors[offset:]
+        return {
+            "success": True,
+            "total_actors": len(actors),
+            "offset": offset,
+            "returned": len(page),
+            "actors": page
+        }
     except Exception as e:
         logger.error(f"get_actors_in_level error: {e}")
         return {"success": False, "message": str(e)}
 
 @mcp.tool()
-def find_actors_by_name(pattern: str) -> Dict[str, Any]:
-    """Find actors by name pattern."""
+def find_actors_by_name(pattern: str, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
+    """Find actors whose name contains the given pattern.
+
+    Args:
+        pattern: Substring to match against actor names
+        limit: Maximum number of matches to return (0 = no limit)
+        offset: Number of matches to skip from the start of the list
+
+    Returns:
+        {total_matches, offset, returned, actors: [{name, class, location, ...}, ...]}
+    """
     unreal = get_unreal_connection()
     if not unreal:
         return {"success": False, "message": "Failed to connect to Unreal Engine"}
-    
+
     try:
         response = unreal.send_command("find_actors_by_name", {"pattern": pattern})
-        return response or {"success": False, "message": "No response from Unreal"}
+        if not response:
+            return {"success": False, "message": "No response from Unreal"}
+        if response.get("status") != "success":
+            return response
+        actors = response.get("result", {}).get("actors", [])
+        page = actors[offset:offset + limit] if limit > 0 else actors[offset:]
+        return {
+            "success": True,
+            "total_matches": len(actors),
+            "offset": offset,
+            "returned": len(page),
+            "actors": page
+        }
     except Exception as e:
         logger.error(f"find_actors_by_name error: {e}")
         return {"success": False, "message": str(e)}
@@ -797,49 +851,80 @@ def analyze_blueprint_graph(
     graph_name: str = "EventGraph",
     include_node_details: bool = True,
     include_pin_connections: bool = True,
-    trace_execution_flow: bool = True
+    trace_execution_flow: bool = True,
+    summary_only: bool = True
 ) -> Dict[str, Any]:
     """
     Analyze a specific graph within a Blueprint (EventGraph, functions, etc.)
     and provide detailed information about nodes, connections, and execution flow.
-    
+
     Args:
         blueprint_path: Full path to the Blueprint asset
         graph_name: Name of the graph to analyze ("EventGraph", function name, etc.)
         include_node_details: Include detailed node properties and settings
         include_pin_connections: Include all pin-to-pin connections
         trace_execution_flow: Trace the execution flow through the graph
-    
+        summary_only: If True (default), return a compact form: nodes trimmed to
+            name/class/title, deduplicated connections, and node/connection counts.
+            Set False for the full payload with per-pin details and node positions.
+
     Returns:
         Dictionary with graph analysis including nodes, connections, and flow
     """
     unreal = get_unreal_connection()
     if not unreal:
         return {"success": False, "message": "Failed to connect to Unreal Engine"}
-    
+
     try:
         params = {
             "blueprint_path": blueprint_path,
             "graph_name": graph_name,
-            "include_node_details": include_node_details,
+            "include_node_details": include_node_details and not summary_only,
+            # Pin connections must be requested for the C++ side to report
+            # node-to-node connections; in summary mode the per-pin arrays
+            # are stripped below and only the connections are kept.
             "include_pin_connections": include_pin_connections,
             "trace_execution_flow": trace_execution_flow
         }
-        
+
         logger.info(f"Analyzing Blueprint graph: {blueprint_path} -> {graph_name}")
         response = unreal.send_command("analyze_blueprint_graph", params)
-        
-        if response and response.get("success", False):
-            graph_data = response.get("graph_data", {})
+        if not response:
+            return {"success": False, "message": "No response from Unreal"}
+
+        result = response.get("result")
+        graph_data = result.get("graph_data") if isinstance(result, dict) else None
+        if response.get("status") == "success" and isinstance(graph_data, dict):
+            nodes = graph_data.get("nodes", [])
+            connections = graph_data.get("connections", [])
+            if summary_only:
+                for node in nodes:
+                    if isinstance(node, dict):
+                        node.pop("pins", None)
+                # Each link is reported twice (once from each endpoint's pin);
+                # keep one entry per pin pair.
+                seen = set()
+                deduped = []
+                for conn in connections:
+                    key = frozenset([
+                        (conn.get("from_node"), conn.get("from_pin")),
+                        (conn.get("to_node"), conn.get("to_pin"))
+                    ])
+                    if key not in seen:
+                        seen.add(key)
+                        deduped.append(conn)
+                connections = deduped
+                graph_data["connections"] = connections
+                graph_data["summary_only"] = True
+            graph_data["node_count"] = len(nodes)
+            graph_data["connection_count"] = len(connections)
             logger.info(f"Graph analysis complete:")
             logger.info(f"  - Graph: {graph_data.get('graph_name', 'Unknown')}")
-            logger.info(f"  - Nodes: {len(graph_data.get('nodes', []))}")
-            logger.info(f"  - Connections: {len(graph_data.get('connections', []))}")
-            if graph_data.get('execution_paths'):
-                logger.info(f"  - Execution paths: {len(graph_data['execution_paths'])}")
-        
-        return response or {"success": False, "message": "No response from Unreal"}
-        
+            logger.info(f"  - Nodes: {len(nodes)}")
+            logger.info(f"  - Connections: {len(connections)}")
+
+        return response
+
     except Exception as e:
         logger.error(f"analyze_blueprint_graph error: {e}")
         return {"success": False, "message": str(e)}
@@ -996,7 +1081,7 @@ def create_pyramid(
                     resp = safe_spawn_actor(unreal, params)
                     if resp and resp.get("status") == "success":
                         spawned.append(resp)
-        return {"success": True, "actors": spawned}
+        return {"success": True, **summarize_spawned_actors(spawned, name_prefix)}
     except Exception as e:
         logger.error(f"create_pyramid error: {e}")
         return {"success": False, "message": str(e)}
@@ -1035,7 +1120,7 @@ def create_wall(
                 resp = safe_spawn_actor(unreal, params)
                 if resp and resp.get("status") == "success":
                     spawned.append(resp)
-        return {"success": True, "actors": spawned}
+        return {"success": True, **summarize_spawned_actors(spawned, name_prefix)}
     except Exception as e:
         logger.error(f"create_wall error: {e}")
         return {"success": False, "message": str(e)}
@@ -1175,7 +1260,7 @@ def create_tower(
                     if resp and resp.get("status") == "success":
                         spawned.append(resp)
                         
-        return {"success": True, "actors": spawned, "tower_style": tower_style}
+        return {"success": True, "tower_style": tower_style, **summarize_spawned_actors(spawned, name_prefix)}
     except Exception as e:
         logger.error(f"create_tower error: {e}")
         return {"success": False, "message": str(e)}
@@ -1209,7 +1294,7 @@ def create_staircase(
             resp = safe_spawn_actor(unreal, params)
             if resp and resp.get("status") == "success":
                 spawned.append(resp)
-        return {"success": True, "actors": spawned}
+        return {"success": True, **summarize_spawned_actors(spawned, name_prefix)}
     except Exception as e:
         logger.error(f"create_staircase error: {e}")
         return {"success": False, "message": str(e)}
@@ -1231,7 +1316,10 @@ def construct_house(
             return {"success": False, "message": "Failed to connect to Unreal Engine"}
 
         # Use the helper function to build the house
-        return build_house(unreal, width, depth, height, location, name_prefix, mesh, house_style)
+        result = build_house(unreal, width, depth, height, location, name_prefix, mesh, house_style)
+        if isinstance(result, dict) and "actors" in result:
+            result.update(summarize_spawned_actors(result.pop("actors"), name_prefix))
+        return result
 
     except Exception as e:
         logger.error(f"construct_house error: {e}")
@@ -1275,7 +1363,7 @@ def construct_mansion(
         return {
             "success": True,
             "message": f"Magnificent {mansion_scale} mansion created with {len(all_actors)} elements!",
-            "actors": all_actors,
+            **summarize_spawned_actors(all_actors, name_prefix),
             "stats": {
                 "scale": mansion_scale,
                 "wings": layout["wings"],
@@ -1324,7 +1412,7 @@ def create_arch(
             resp = safe_spawn_actor(unreal, params)
             if resp and resp.get("status") == "success":
                 spawned.append(resp)
-        return {"success": True, "actors": spawned}
+        return {"success": True, **summarize_spawned_actors(spawned, name_prefix)}
     except Exception as e:
         logger.error(f"create_arch error: {e}")
         return {"success": False, "message": str(e)}
@@ -1449,7 +1537,8 @@ def create_maze(
             
         import random
         spawned = []
-        
+        wall_count = 0
+
         # Initialize maze grid - True means wall, False means open
         maze = [[True for _ in range(cols * 2 + 1)] for _ in range(rows * 2 + 1)]
         
@@ -1504,7 +1593,8 @@ def create_maze(
                         resp = safe_spawn_actor(unreal, params)
                         if resp and resp.get("status") == "success":
                             spawned.append(resp)
-        
+                            wall_count += 1
+
         # Add entrance and exit markers
         entrance_marker = safe_spawn_actor(unreal, {
             "name": "Maze_Entrance",
@@ -1531,10 +1621,10 @@ def create_maze(
             spawned.append(exit_marker)
         
         return {
-            "success": True, 
-            "actors": spawned, 
+            "success": True,
+            **summarize_spawned_actors(spawned, "Maze"),
             "maze_size": f"{rows}x{cols}",
-            "wall_count": len([block for block in spawned if "Wall" in block.get("name", "")]),
+            "wall_count": wall_count,
             "entrance": "Left side (cylinder marker)",
             "exit": "Right side (sphere marker)"
         }
@@ -1776,7 +1866,7 @@ def create_town(
                     building_count
                 )
                 
-                if building_result.get("status") == "success":
+                if building_result.get("success"):
                     all_spawned.extend(building_result.get("actors", []))
                     building_count += 1
         
@@ -1846,7 +1936,7 @@ def create_town(
                 "total_actors": len(all_spawned),
                 "architectural_style": architectural_style
             },
-            "actors": all_spawned,
+            **summarize_spawned_actors(all_spawned, name_prefix),
             "message": f"Created {town_size} town with {building_count} buildings and {infrastructure_count} infrastructure items"
         }
         
@@ -1909,7 +1999,7 @@ def create_castle_fortress(
         return {
             "success": True,
             "message": f"Epic {castle_size} {architectural_style} castle fortress created with {len(all_actors)} elements!",
-            "actors": all_actors,
+            **summarize_spawned_actors(all_actors, name_prefix),
             "stats": {
                 "size": castle_size,
                 "style": architectural_style,
@@ -2030,7 +2120,7 @@ def create_suspension_bridge(
         return {
             "success": True,
             "message": f"Created suspension bridge with {total_actors} components",
-            "actors": all_actors,
+            **summarize_spawned_actors(all_actors, name_prefix),
             "metrics": {
                 "total_actors": total_actors,
                 "deck_segments": counts["deck_segments"],
@@ -2164,7 +2254,7 @@ def create_aqueduct(
         return {
             "success": True,
             "message": f"Created {tiers}-tier aqueduct with {arches} arches ({total_actors} components)",
-            "actors": all_actors,
+            **summarize_spawned_actors(all_actors, name_prefix),
             "metrics": {
                 "total_actors": total_actors,
                 "arch_segments": counts["arch_segments"],

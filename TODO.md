@@ -2,7 +2,6 @@
 
 Design-review follow-ups. This list is the source of truth for overall priority: items are ordered highest-priority first. Items with a `depends on` attribute must not be started (or re-ordered to run) before the items they depend on. Details for each item live in `TODO/<item-id>.md`.
 
-- [ ] **trim-tool-result-payloads** — Return summaries instead of full actor lists from build tools; biggest agent-context win
 - [ ] **fix-cpp-message-framing** — Newline-delimit/length-prefix the TCP protocol; C++ currently drops any command over 8KB
 - [ ] **add-spawn-actors-batch** — Add a SpawnActorsBatch command so builders issue one round trip instead of hundreds
   - depends on: `fix-cpp-message-framing`
