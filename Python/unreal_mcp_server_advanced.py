@@ -352,9 +352,9 @@ class UnrealConnection:
                     logger.error(f"JSON decode error: {e}")
                     logger.debug(f"Raw response: {response_data[:500]}")
                     raise ValueError(f"Invalid JSON response: {e}")
-                
-                logger.info(f"Command {command} completed successfully")
-                
+
+                logger.debug(f"Raw response for {command}: {response_data[:2000].decode('utf-8', errors='replace')}")
+
                 # Normalize error responses
                 if response.get("status") == "error":
                     error_msg = response.get("error") or response.get("message", "Unknown error")
@@ -688,10 +688,12 @@ def compile_blueprint(blueprint_name: str) -> Dict[str, Any]:
     the error messages so the caller can diagnose and fix them.
 
     Args:
-        blueprint_name: Name of the Blueprint to compile.
+        blueprint_name: Full asset path ("/Game/Path/BP_Name") or short name.
+            Short names are resolved project-wide; if multiple Blueprints share
+            the name, the call fails listing the candidate paths.
 
     Returns:
-        On success: {"compiled": true, "warnings": [...]}
+        On success: {"compiled": true, "blueprint_path": ..., "warnings": [...]}
         On failure: {"compiled": false, "errors": [...], "warnings": [...]}
     """
     unreal = get_unreal_connection()
@@ -704,13 +706,21 @@ def compile_blueprint(blueprint_name: str) -> Dict[str, Any]:
         if not response:
             return {"success": False, "message": "No response from Unreal"}
 
-        # Extract compilation result from the response
-        result = response.get("result", response)
+        # A status:error response (blueprint not found, connection failure, ...)
+        # means no compile happened — never report it as compiled.
+        if response.get("status") != "success":
+            return {
+                "success": False,
+                "compiled": False,
+                "message": response.get("error", "Unknown error from Unreal"),
+            }
+
+        result = response.get("result", {})
         compiled = result.get("compiled", False)
         errors = result.get("errors", [])
         warnings = result.get("warnings", [])
 
-        if not compiled and errors:
+        if not compiled:
             return {
                 "success": False,
                 "compiled": False,
@@ -720,6 +730,8 @@ def compile_blueprint(blueprint_name: str) -> Dict[str, Any]:
             }
 
         ret = {"success": True, "compiled": True, "name": result.get("name", blueprint_name)}
+        if "blueprint_path" in result:
+            ret["blueprint_path"] = result["blueprint_path"]
         if warnings:
             ret["warnings"] = warnings
         return ret

@@ -395,10 +395,12 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleCompileBlueprint(
     }
 
     // Find the blueprint
-    UBlueprint* Blueprint = FEpicUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    FString FindError;
+    UBlueprint* Blueprint = FEpicUnrealMCPCommonUtils::FindBlueprintByName(BlueprintName, FindError);
     if (!Blueprint)
     {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(
+            FindError.IsEmpty() ? FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName) : FindError);
     }
 
     // Compile the blueprint, capturing compiler messages
@@ -424,9 +426,31 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleCompileBlueprint(
         }
     }
 
+    // Backstop: the blueprint's own post-compile status catches errors that
+    // never reached our results log (e.g. raised during reinstancing).
+    const bool bStatusError = Blueprint->Status == BS_Error;
+    if (bStatusError && ErrorArray.Num() == 0)
+    {
+        ErrorArray.Add(MakeShared<FJsonValueString>(TEXT(
+            "Blueprint status is Error after compile but no messages were captured; see the editor's Compiler Results panel")));
+    }
+
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("name"), BlueprintName);
-    ResultObj->SetBoolField(TEXT("compiled"), ErrorArray.Num() == 0);
+    ResultObj->SetStringField(TEXT("blueprint_path"), Blueprint->GetPathName());
+    ResultObj->SetBoolField(TEXT("compiled"), ErrorArray.Num() == 0 && !bStatusError);
+
+    FString StatusString;
+    switch (Blueprint->Status)
+    {
+        case BS_UpToDate:             StatusString = TEXT("UpToDate"); break;
+        case BS_UpToDateWithWarnings: StatusString = TEXT("UpToDateWithWarnings"); break;
+        case BS_Error:                StatusString = TEXT("Error"); break;
+        case BS_Dirty:                StatusString = TEXT("Dirty"); break;
+        case BS_BeingCreated:         StatusString = TEXT("BeingCreated"); break;
+        default:                      StatusString = TEXT("Unknown"); break;
+    }
+    ResultObj->SetStringField(TEXT("blueprint_status"), StatusString);
 
     if (ErrorArray.Num() > 0)
     {

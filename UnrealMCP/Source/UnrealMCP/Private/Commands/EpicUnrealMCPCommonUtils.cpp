@@ -20,6 +20,7 @@
 #include "Engine/Selection.h"
 #include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/ARFilter.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "BlueprintNodeSpawner.h"
 #include "BlueprintActionDatabase.h"
@@ -153,6 +154,12 @@ UBlueprint* FEpicUnrealMCPCommonUtils::FindBlueprint(const FString& BlueprintNam
 
 UBlueprint* FEpicUnrealMCPCommonUtils::FindBlueprintByName(const FString& BlueprintName)
 {
+    FString UnusedError;
+    return FindBlueprintByName(BlueprintName, UnusedError);
+}
+
+UBlueprint* FEpicUnrealMCPCommonUtils::FindBlueprintByName(const FString& BlueprintName, FString& OutError)
+{
     // The correct object path for a Blueprint asset is /Game/Path/AssetName.AssetName
     FString ObjectPath;
 
@@ -194,13 +201,49 @@ UBlueprint* FEpicUnrealMCPCommonUtils::FindBlueprintByName(const FString& Bluepr
     // where it might be found via its package path.
     FString PackagePath = TEXT("/Game/Blueprints/") + BlueprintName;
     Blueprint = FindObject<UBlueprint>(nullptr, *PackagePath);
-
-    if (!Blueprint)
+    if (Blueprint)
     {
-         UE_LOG(LogTemp, Error, TEXT("FindBlueprintByName: Failed to find or load blueprint: %s"), *BlueprintName);
+        return Blueprint;
     }
 
-    return Blueprint;
+    // Short names are not restricted to /Game/Blueprints/ — search the whole
+    // project for a Blueprint asset with this name before giving up.
+    if (!BlueprintName.StartsWith(TEXT("/")))
+    {
+        FARFilter Filter;
+        Filter.ClassPaths.Add(UBlueprint::StaticClass()->GetClassPathName());
+        Filter.bRecursiveClasses = true;
+        Filter.PackagePaths.Add(TEXT("/Game"));
+        Filter.bRecursivePaths = true;
+
+        TArray<FAssetData> Candidates;
+        AssetRegistryModule.Get().GetAssets(Filter, Candidates);
+        Candidates.RemoveAll([&BlueprintName](const FAssetData& Asset)
+        {
+            return !Asset.AssetName.ToString().Equals(BlueprintName, ESearchCase::IgnoreCase);
+        });
+
+        if (Candidates.Num() == 1)
+        {
+            return Cast<UBlueprint>(Candidates[0].GetAsset());
+        }
+        if (Candidates.Num() > 1)
+        {
+            TArray<FString> Paths;
+            for (const FAssetData& Asset : Candidates)
+            {
+                Paths.Add(Asset.PackageName.ToString());
+            }
+            OutError = FString::Printf(TEXT("Blueprint name '%s' is ambiguous; pass a full path. Candidates: %s"),
+                *BlueprintName, *FString::Join(Paths, TEXT(", ")));
+            UE_LOG(LogTemp, Error, TEXT("FindBlueprintByName: %s"), *OutError);
+            return nullptr;
+        }
+    }
+
+    OutError = FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName);
+    UE_LOG(LogTemp, Error, TEXT("FindBlueprintByName: Failed to find or load blueprint: %s"), *BlueprintName);
+    return nullptr;
 }
 
 UEdGraph* FEpicUnrealMCPCommonUtils::FindOrCreateEventGraph(UBlueprint* Blueprint)
