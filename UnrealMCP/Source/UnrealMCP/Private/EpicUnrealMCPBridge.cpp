@@ -276,7 +276,9 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
                      CommandType == TEXT("delete_actor") ||
                      CommandType == TEXT("set_actor_transform") ||
                      CommandType == TEXT("spawn_blueprint_actor") ||
-                     CommandType == TEXT("read_data_table"))
+                     CommandType == TEXT("read_data_table") ||
+                     CommandType == TEXT("get_world_settings") ||
+                     CommandType == TEXT("set_level_gamemode"))
             {
                 ResultJson = Self->EditorCommands->HandleCommand(CommandType, Params);
             }

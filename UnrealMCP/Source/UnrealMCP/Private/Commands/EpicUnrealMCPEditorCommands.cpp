@@ -23,6 +23,8 @@
 #include "EditorAssetLibrary.h"
 #include "Engine/DataTable.h"
 #include "DataTableUtils.h"
+#include "GameFramework/WorldSettings.h"
+#include "GameFramework/GameModeBase.h"
 #include "Commands/EpicUnrealMCPBlueprintCommands.h"
 
 FEpicUnrealMCPEditorCommands::FEpicUnrealMCPEditorCommands()
@@ -61,6 +63,15 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleCommand(const FStrin
     else if (CommandType == TEXT("read_data_table"))
     {
         return HandleReadDataTable(Params);
+    }
+    // World settings commands
+    else if (CommandType == TEXT("get_world_settings"))
+    {
+        return HandleGetWorldSettings(Params);
+    }
+    else if (CommandType == TEXT("set_level_gamemode"))
+    {
+        return HandleSetLevelGameMode(Params);
     }
 
     return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown editor command: %s"), *CommandType));
@@ -394,5 +405,106 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleReadDataTable(const 
     ResultObj->SetStringField(TEXT("row_struct"), RowStructName);
     ResultObj->SetNumberField(TEXT("row_count"), DataTable->GetRowMap().Num());
     ResultObj->SetObjectField(TEXT("rows"), RowsObj);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleGetWorldSettings(const TSharedPtr<FJsonObject>& Params)
+{
+    UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+    if (!World)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("No editor world is currently loaded"));
+    }
+
+    AWorldSettings* WorldSettings = World->GetWorldSettings();
+    if (!WorldSettings)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Current world has no WorldSettings actor"));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("level"), World->GetOutermost()->GetName());
+    ResultObj->SetStringField(TEXT("world_settings_class"), WorldSettings->GetClass()->GetPathName());
+    if (WorldSettings->DefaultGameMode)
+    {
+        ResultObj->SetStringField(TEXT("game_mode_override"), WorldSettings->DefaultGameMode->GetPathName());
+    }
+    else
+    {
+        ResultObj->SetField(TEXT("game_mode_override"), MakeShared<FJsonValueNull>());
+    }
+    ResultObj->SetNumberField(TEXT("kill_z"), WorldSettings->KillZ);
+    ResultObj->SetBoolField(TEXT("global_gravity_set"), WorldSettings->bGlobalGravitySet);
+    ResultObj->SetNumberField(TEXT("global_gravity_z"), WorldSettings->GlobalGravityZ);
+    ResultObj->SetNumberField(TEXT("world_to_meters"), WorldSettings->WorldToMeters);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FEpicUnrealMCPEditorCommands::HandleSetLevelGameMode(const TSharedPtr<FJsonObject>& Params)
+{
+    FString GameModePath;
+    if (!Params->TryGetStringField(TEXT("game_mode_path"), GameModePath))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'game_mode_path' parameter"));
+    }
+
+    UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+    if (!World)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("No editor world is currently loaded"));
+    }
+
+    AWorldSettings* WorldSettings = World->GetWorldSettings();
+    if (!WorldSettings)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Current world has no WorldSettings actor"));
+    }
+
+    // Empty path clears the override (falls back to the project default game mode)
+    UClass* GameModeClass = nullptr;
+    if (!GameModePath.TrimStartAndEnd().IsEmpty())
+    {
+        FString FindError;
+        UBlueprint* GameModeBlueprint = FEpicUnrealMCPCommonUtils::FindBlueprintByName(GameModePath, FindError);
+        if (GameModeBlueprint && GameModeBlueprint->GeneratedClass)
+        {
+            GameModeClass = GameModeBlueprint->GeneratedClass;
+        }
+        else
+        {
+            // Not a Blueprint asset — try a direct class load (native class or explicit _C path)
+            GameModeClass = LoadClass<AGameModeBase>(nullptr, *GameModePath);
+        }
+
+        if (!GameModeClass)
+        {
+            return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(
+                TEXT("Could not resolve a game mode class from '%s'%s%s"),
+                *GameModePath,
+                FindError.IsEmpty() ? TEXT("") : TEXT(": "),
+                *FindError));
+        }
+
+        if (!GameModeClass->IsChildOf(AGameModeBase::StaticClass()))
+        {
+            return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(
+                TEXT("Class '%s' is not a subclass of AGameModeBase"), *GameModeClass->GetPathName()));
+        }
+    }
+
+    WorldSettings->Modify();
+    WorldSettings->DefaultGameMode = GameModeClass;
+    WorldSettings->MarkPackageDirty();
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("level"), World->GetOutermost()->GetName());
+    if (GameModeClass)
+    {
+        ResultObj->SetStringField(TEXT("game_mode_override"), GameModeClass->GetPathName());
+    }
+    else
+    {
+        ResultObj->SetField(TEXT("game_mode_override"), MakeShared<FJsonValueNull>());
+    }
     return ResultObj;
 }

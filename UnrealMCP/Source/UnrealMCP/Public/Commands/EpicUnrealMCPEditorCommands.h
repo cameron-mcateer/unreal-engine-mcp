@@ -28,4 +28,8 @@ private:
 
     // DataTable commands
     TSharedPtr<FJsonObject> HandleReadDataTable(const TSharedPtr<FJsonObject>& Params);
+
+    // World settings commands
+    TSharedPtr<FJsonObject> HandleGetWorldSettings(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleSetLevelGameMode(const TSharedPtr<FJsonObject>& Params);
 };

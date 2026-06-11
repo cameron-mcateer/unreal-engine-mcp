@@ -532,6 +532,59 @@ def find_actors_by_name(pattern: str, limit: int = 50, offset: int = 0) -> Dict[
         return {"success": False, "message": str(e)}
 
 
+@mcp.tool()
+def get_world_settings() -> Dict[str, Any]:
+    """Read the World Settings of the currently open level.
+
+    Returns:
+        Dictionary with:
+            level: package path of the open level (e.g. "/Game/Maps/Lvl_ThirdPerson")
+            game_mode_override: class path of the GameMode Override, or null if unset
+                (null means the project default game mode is used)
+            world_settings_class, kill_z, global_gravity_set, global_gravity_z,
+            world_to_meters
+    """
+    unreal = get_unreal_connection()
+    if not unreal:
+        return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+    try:
+        response = unreal.send_command("get_world_settings", {})
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"get_world_settings error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def set_level_gamemode(game_mode_path: str) -> Dict[str, Any]:
+    """Set the GameMode Override of the currently open level's World Settings.
+
+    Controls which game mode (and therefore which default pawn, HUD, controller)
+    is used when playing this level in PIE or in game. The level package is
+    marked dirty — save the level to persist the change.
+
+    Args:
+        game_mode_path: GameMode Blueprint name or path
+            (e.g. "BP_CombatGameMode" or "/Game/Blueprints/BP_CombatGameMode"),
+            a native class path (e.g. "/Script/Engine.GameModeBase"),
+            or "" to clear the override and fall back to the project default.
+
+    Returns:
+        Dictionary with level and the resolved game_mode_override class path
+        (null if cleared)
+    """
+    unreal = get_unreal_connection()
+    if not unreal:
+        return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+    try:
+        response = unreal.send_command("set_level_gamemode", {"game_mode_path": game_mode_path})
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"set_level_gamemode error: {e}")
+        return {"success": False, "message": str(e)}
+
 
 @mcp.tool()
 def delete_actor(name: str) -> Dict[str, Any]:
