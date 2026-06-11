@@ -329,15 +329,19 @@ def add_component_event_node(
     """
     Add a Component Bound Event node to a Blueprint graph.
 
-    Creates a UK2Node_ComponentBoundEvent that binds to a multicast delegate
-    on a component in the Blueprint's SimpleConstructionScript.
+    Creates a UK2Node_ComponentBoundEvent that binds to a BlueprintAssignable
+    multicast delegate on one of the Blueprint's components — either a component
+    in the SimpleConstructionScript (added via add_component_to_blueprint) or a
+    native C++ component inherited from the parent class.
 
     Args:
         unreal_connection: Connection to Unreal Engine
         blueprint_name: Name of the Blueprint
-        component_name: Name of the component (as added via add_component_to_blueprint)
-        event_type: Delegate name on the component. Common values:
-            "OnComponentBeginOverlap", "OnComponentEndOverlap", "OnComponentHit"
+        component_name: Name of the component variable (SCS name or native
+            UPROPERTY name, e.g. "InventoryComponent")
+        event_type: Delegate property name on the component class. Common values:
+            "OnComponentBeginOverlap", "OnComponentEndOverlap", "OnComponentHit",
+            or any custom BlueprintAssignable delegate (e.g. "OnHotbarItemUsed")
         pos_x: X position in graph
         pos_y: Y position in graph
 

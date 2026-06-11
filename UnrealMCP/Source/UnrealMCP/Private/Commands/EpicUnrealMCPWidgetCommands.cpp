@@ -45,6 +45,10 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPWidgetCommands::HandleCommand(const FStrin
     {
         return HandleGetWidgetChildren(Params);
     }
+    else if (CommandType == TEXT("set_widget_property"))
+    {
+        return HandleSetWidgetProperty(Params);
+    }
 
     return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown widget command: %s"), *CommandType));
 }
@@ -221,8 +225,16 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPWidgetCommands::HandleAddWidgetChild(const
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to add widget to parent"));
     }
 
-    // Register as a variable so it's accessible in the event graph
-    WidgetBP->OnVariableAdded(NewWidget->GetFName());
+    // bIsVariable is what the widget blueprint compiler checks when deciding
+    // to generate a member variable on the generated class; without it,
+    // VariableGet nodes for this widget cannot resolve
+    bool bIsVariable = true;
+    Params->TryGetBoolField(TEXT("is_variable"), bIsVariable);
+    NewWidget->bIsVariable = bIsVariable;
+    if (bIsVariable)
+    {
+        WidgetBP->OnVariableAdded(NewWidget->GetFName());
+    }
 
     // Configure canvas slot properties if parent is a CanvasPanel
     UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(Slot);
@@ -282,8 +294,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPWidgetCommands::HandleAddWidgetChild(const
         ApplyWidgetProperties(NewWidget, *PropertiesObj);
     }
 
-    // Mark dirty and compile
-    FBlueprintEditorUtils::MarkBlueprintAsModified(WidgetBP);
+    // Structural: the generated class gains/loses a member variable
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
     FKismetEditorUtilities::CompileBlueprint(WidgetBP);
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
@@ -291,6 +303,84 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPWidgetCommands::HandleAddWidgetChild(const
     ResultObj->SetStringField(TEXT("widget_type"), WidgetType);
     ResultObj->SetStringField(TEXT("parent"), ParentWidget->GetName());
     ResultObj->SetBoolField(TEXT("has_canvas_slot"), CanvasSlot != nullptr);
+    ResultObj->SetBoolField(TEXT("is_variable"), bIsVariable);
+    return ResultObj;
+}
+
+// ---------------------------------------------------------------------------
+// set_widget_property
+// ---------------------------------------------------------------------------
+TSharedPtr<FJsonObject> FEpicUnrealMCPWidgetCommands::HandleSetWidgetProperty(const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_name' parameter"));
+    }
+
+    FString WidgetName;
+    if (!Params->TryGetStringField(TEXT("widget_name"), WidgetName))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'widget_name' parameter"));
+    }
+
+    const TSharedPtr<FJsonObject>* PropertiesObj;
+    if (!Params->TryGetObjectField(TEXT("properties"), PropertiesObj))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'properties' parameter"));
+    }
+
+    UWidgetBlueprint* WidgetBP = FindWidgetBlueprint(BlueprintName);
+    if (!WidgetBP)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Widget Blueprint not found: %s"), *BlueprintName));
+    }
+
+    UWidget* Widget = WidgetBP->WidgetTree->FindWidget(FName(*WidgetName));
+    if (!Widget)
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Widget not found: %s"), *WidgetName));
+    }
+
+    // bIsVariable changes the members of the generated class, so it needs the
+    // structural-modification path; everything else is a plain property edit
+    bool bStructuralChange = false;
+    bool bIsVariable;
+    if ((*PropertiesObj)->TryGetBoolField(TEXT("bIsVariable"), bIsVariable) ||
+        (*PropertiesObj)->TryGetBoolField(TEXT("IsVariable"), bIsVariable))
+    {
+        if (Widget->bIsVariable != bIsVariable)
+        {
+            Widget->Modify();
+            Widget->bIsVariable = bIsVariable;
+            if (bIsVariable)
+            {
+                WidgetBP->OnVariableAdded(Widget->GetFName());
+            }
+            else
+            {
+                WidgetBP->OnVariableRemoved(Widget->GetFName());
+            }
+            bStructuralChange = true;
+        }
+    }
+
+    ApplyWidgetProperties(Widget, *PropertiesObj);
+
+    if (bStructuralChange)
+    {
+        FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBP);
+    }
+    else
+    {
+        FBlueprintEditorUtils::MarkBlueprintAsModified(WidgetBP);
+    }
+    FKismetEditorUtilities::CompileBlueprint(WidgetBP);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("widget_name"), Widget->GetName());
+    ResultObj->SetStringField(TEXT("widget_type"), Widget->GetClass()->GetName());
+    ResultObj->SetBoolField(TEXT("is_variable"), Widget->bIsVariable);
     return ResultObj;
 }
 
@@ -334,6 +424,8 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPWidgetCommands::HandleGetWidgetChildren(co
             {
                 WidgetObj->SetField(TEXT("parent"), MakeShared<FJsonValueNull>());
             }
+
+            WidgetObj->SetBoolField(TEXT("is_variable"), Widget->bIsVariable);
 
             // Is this a container?
             WidgetObj->SetBoolField(TEXT("is_panel"), Widget->IsA<UPanelWidget>());

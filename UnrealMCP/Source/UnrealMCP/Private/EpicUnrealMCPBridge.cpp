@@ -321,7 +321,8 @@ FString UEpicUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const T
             // Widget Commands
             else if (CommandType == TEXT("create_widget_blueprint") ||
                      CommandType == TEXT("add_widget_child") ||
-                     CommandType == TEXT("get_widget_children"))
+                     CommandType == TEXT("get_widget_children") ||
+                     CommandType == TEXT("set_widget_property"))
             {
                 ResultJson = Self->WidgetCommands->HandleCommand(CommandType, Params);
             }

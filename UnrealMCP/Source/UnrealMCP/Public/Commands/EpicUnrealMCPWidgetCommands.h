@@ -23,6 +23,7 @@ private:
     TSharedPtr<FJsonObject> HandleCreateWidgetBlueprint(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleAddWidgetChild(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleGetWidgetChildren(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleSetWidgetProperty(const TSharedPtr<FJsonObject>& Params);
 
     // Helpers
     static UWidgetBlueprint* FindWidgetBlueprint(const FString& BlueprintName);

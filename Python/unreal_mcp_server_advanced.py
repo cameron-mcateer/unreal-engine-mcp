@@ -986,12 +986,16 @@ def get_blueprint_events(
     blueprint_name: str
 ) -> Dict[str, Any]:
     """
-    List all Blueprint events available on a Blueprint's class and its full parent class hierarchy.
+    List all Blueprint events available on a Blueprint's class and its full parent class
+    hierarchy, plus the BlueprintAssignable delegates of the Blueprint's components.
 
     Returns every BlueprintImplementableEvent and BlueprintNativeEvent that can be
     added as an event node via add_node(node_type="Event"), together with the output
-    pins each event exposes.  Call this before add_node to discover valid event_type
-    values and the pins they will produce.
+    pins each event exposes.  Also returns every component multicast delegate that can
+    be bound via add_node(node_type="ComponentEvent") — covering both components added
+    in the Blueprint and native C++ components inherited from the parent class.
+    Call this before add_node to discover valid event_type values and the pins they
+    will produce.
 
     Args:
         blueprint_name: Name or path of the Blueprint
@@ -1005,6 +1009,10 @@ def get_blueprint_events(
               defining_class (str) – class that declares the event, e.g. "Actor"
               pins (list)         – output pins: [{ name, type, sub_type (optional) }]
           - count (int): total number of events found
+          - component_delegates (list): each entry contains
+              component_name (str)  – value to pass as add_node component_name
+              component_class (str) – e.g. "RRInventoryComponent"
+              delegates (list)      – [{ delegate_name (pass as event_type), pins }]
     """
     unreal = get_unreal_connection()
     if not unreal:
@@ -2370,17 +2378,24 @@ def add_node(
                     ℹ️ Use get_blueprint_events(blueprint_name) to discover every event
                        available on the Blueprint's class hierarchy and its output pins.
                     ℹ️ Tick events run every frame - be mindful of performance impact
-                "ComponentEvent" - Component-level delegate event node.
-                    Binds to a multicast delegate on a component in the Blueprint's SCS.
-                    Requires component_name= and event_type= parameters.
-                    ⚠️ The component must already exist (added via add_component_to_blueprint).
-                    Supported event_type values:
+                "ComponentEvent" - Component-bound delegate event node (K2Node_ComponentBoundEvent).
+                    Binds to a BlueprintAssignable multicast delegate on one of the
+                    Blueprint's components and exposes the delegate's parameters as
+                    output pins. Works for components added via add_component_to_blueprint
+                    (SCS) and for native C++ components inherited from the parent class.
+                    Requires component_name= and event_type= (the delegate property name).
+                    Common event_type values:
                         "OnComponentBeginOverlap" - pins: OverlappedComponent, OtherActor,
                             OtherComp, OtherBodyIndex, bFromSweep, SweepResult
                         "OnComponentEndOverlap" - pins: OverlappedComponent, OtherActor,
                             OtherComp, OtherBodyIndex
                         "OnComponentHit" - pins: HitComponent, OtherActor, OtherComp,
                             NormalImpulse, Hit
+                        ...plus any custom BlueprintAssignable delegate declared on the
+                        component class (e.g. "OnHotbarItemUsed").
+                    ℹ️ Use get_blueprint_events(blueprint_name) and read the
+                       "component_delegates" list to discover every bindable delegate
+                       per component together with its parameter pins.
                 "InputActionEvent" - Enhanced Input action event node.
                     Creates a UK2Node_EnhancedInputAction with exec pins for each trigger event:
                     Started, Triggered, Ongoing, Canceled, Completed.
@@ -2439,6 +2454,16 @@ def add_node(
     """
     if node_type in ("DynamicCast", "ClassDynamicCast") and not target_class:
         return {"success": False, "error": f"{node_type} requires target_class"}
+    if node_type == "Event" and component_name:
+        return {
+            "success": False,
+            "error": "node_type='Event' creates a class event and ignores component_name — "
+                     "the resulting node would never fire for a component delegate. "
+                     "To bind a component's BlueprintAssignable delegate, use "
+                     "node_type='ComponentEvent' with component_name and event_type. "
+                     "Call get_blueprint_events() and read 'component_delegates' to "
+                     "discover bindable delegates and their pins."
+        }
     if node_type == "ComponentEvent" and not component_name:
         return {"success": False, "error": "ComponentEvent requires component_name"}
     if node_type == "ComponentEvent" and not event_type:
@@ -3349,7 +3374,8 @@ def add_widget_child(
     anchors: List[float] = [],
     alignment: List[float] = [],
     z_order: int = 0,
-    properties: Dict[str, Any] = {}
+    properties: Dict[str, Any] = {},
+    is_variable: bool = True
 ) -> Dict[str, Any]:
     """Add a UMG widget to a Widget Blueprint's hierarchy.
 
@@ -3383,9 +3409,11 @@ def add_widget_child(
             Button: BackgroundColor ([R,G,B,A])
             Border: ContentColorAndOpacity ([R,G,B,A]), BrushColor ([R,G,B,A])
             SizeBox: WidthOverride (float), HeightOverride (float)
+        is_variable: Expose the widget as a Blueprint variable so graph nodes
+            (e.g. VariableGet) can reference it (default True)
 
     Returns:
-        Dictionary with widget_name, widget_type, parent, has_canvas_slot
+        Dictionary with widget_name, widget_type, parent, has_canvas_slot, is_variable
     """
     unreal = get_unreal_connection()
     if not unreal:
@@ -3411,10 +3439,58 @@ def add_widget_child(
             params["z_order"] = z_order
         if properties:
             params["properties"] = properties
+        params["is_variable"] = is_variable
         response = unreal.send_command("add_widget_child", params)
         return response or {"success": False, "message": "No response from Unreal"}
     except Exception as e:
         logger.error(f"add_widget_child error: {e}")
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def set_widget_property(
+    blueprint_name: str,
+    widget_name: str,
+    properties: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Modify properties of an existing widget in a Widget Blueprint's tree.
+
+    Accepts the same widget-specific properties as add_widget_child, plus
+    bIsVariable to expose/hide the widget as a Blueprint variable. Setting
+    bIsVariable=true regenerates the Blueprint class so graph nodes
+    (e.g. VariableGet) can reference the widget — use this to repair widgets
+    created before variable exposure was supported.
+
+    Args:
+        blueprint_name: Name or path of the Widget Blueprint (e.g. "WBP_PlayerHUD")
+        widget_name: Name of the existing widget to modify (e.g. "WeaponNameText")
+        properties: Properties to set. Supported:
+            bIsVariable (bool): expose widget as a Blueprint variable
+            Common: Visibility, IsEnabled, RenderOpacity, ToolTipText
+            ProgressBar: Percent, FillColorAndOpacity, IsMarquee
+            TextBlock: Text, ColorAndOpacity, FontSize, Justification
+            Image: ColorAndOpacity, Brush
+            Button: BackgroundColor
+            Border: ContentColorAndOpacity, BrushColor
+            SizeBox: WidthOverride, HeightOverride
+
+    Returns:
+        Dictionary with widget_name, widget_type, is_variable
+    """
+    unreal = get_unreal_connection()
+    if not unreal:
+        return {"success": False, "message": "Failed to connect to Unreal Engine"}
+
+    try:
+        params = {
+            "blueprint_name": blueprint_name,
+            "widget_name": widget_name,
+            "properties": properties
+        }
+        response = unreal.send_command("set_widget_property", params)
+        return response or {"success": False, "message": "No response from Unreal"}
+    except Exception as e:
+        logger.error(f"set_widget_property error: {e}")
         return {"success": False, "message": str(e)}
 
 
@@ -3432,7 +3508,7 @@ def get_widget_children(
 
     Returns:
         Dictionary with widgets array, each containing:
-            name, type, parent, is_panel, child_count (if panel),
+            name, type, parent, is_variable, is_panel, child_count (if panel),
             slot (if in canvas: position, size, anchors, alignment, z_order)
     """
     unreal = get_unreal_connection()

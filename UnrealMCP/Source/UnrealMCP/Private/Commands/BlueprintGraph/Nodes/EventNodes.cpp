@@ -1,6 +1,7 @@
 #include "Commands/BlueprintGraph/Nodes/EventNodes.h"
 #include "Commands/BlueprintGraph/Nodes/NodeCreatorUtils.h"
 #include "K2Node_ComponentBoundEvent.h"
+#include "Components/ActorComponent.h"
 #include "Engine/Blueprint.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
@@ -30,32 +31,34 @@ UK2Node* FEventNodeCreator::CreateComponentBoundEventNode(UBlueprint* Blueprint,
 		return nullptr;
 	}
 
-	// Find the SCS node for the component
+	// Resolve the component's class and variable name. Components added in this
+	// Blueprint live in the SimpleConstructionScript; native C++ components and
+	// components inherited from parent Blueprints only exist as object properties
+	// on the class chain.
+	UClass* ComponentClass = nullptr;
+	FName VariableName;
+
 	USimpleConstructionScript* SCS = Blueprint->SimpleConstructionScript;
-	if (!SCS)
+	USCS_Node* SCSNode = SCS ? SCS->FindSCSNode(FName(*ComponentName)) : nullptr;
+	if (SCSNode && SCSNode->ComponentTemplate)
 	{
-		UE_LOG(LogTemp, Error, TEXT("ComponentEvent: Blueprint has no SimpleConstructionScript"));
-		return nullptr;
+		ComponentClass = SCSNode->ComponentTemplate->GetClass();
+		VariableName = SCSNode->GetVariableName();
+	}
+	else
+	{
+		UClass* SearchClass = Blueprint->GeneratedClass ? *Blueprint->GeneratedClass : *Blueprint->ParentClass;
+		FObjectProperty* ObjProp = FindFProperty<FObjectProperty>(SearchClass, FName(*ComponentName));
+		if (ObjProp && ObjProp->PropertyClass && ObjProp->PropertyClass->IsChildOf(UActorComponent::StaticClass()))
+		{
+			ComponentClass = ObjProp->PropertyClass;
+			VariableName = ObjProp->GetFName();
+		}
 	}
 
-	USCS_Node* SCSNode = SCS->FindSCSNode(FName(*ComponentName));
-	if (!SCSNode)
-	{
-		UE_LOG(LogTemp, Error, TEXT("ComponentEvent: Component '%s' not found in Blueprint SCS"), *ComponentName);
-		return nullptr;
-	}
-
-	if (!SCSNode->ComponentTemplate)
-	{
-		UE_LOG(LogTemp, Error, TEXT("ComponentEvent: Component '%s' has no template"), *ComponentName);
-		return nullptr;
-	}
-
-	// Get the component class to find the delegate property
-	UClass* ComponentClass = SCSNode->ComponentTemplate->GetClass();
 	if (!ComponentClass)
 	{
-		UE_LOG(LogTemp, Error, TEXT("ComponentEvent: Could not determine class for component '%s'"), *ComponentName);
+		UE_LOG(LogTemp, Error, TEXT("ComponentEvent: Component '%s' not found in Blueprint SCS or as a component property on the class"), *ComponentName);
 		return nullptr;
 	}
 
@@ -71,8 +74,8 @@ UK2Node* FEventNodeCreator::CreateComponentBoundEventNode(UBlueprint* Blueprint,
 	}
 
 	// Find the FObjectProperty for the component variable on the generated class.
-	// After compilation the SCS node's InternalVariableName becomes a property on GeneratedClass.
-	FName VariableName = SCSNode->GetVariableName();
+	// After compilation the SCS node's InternalVariableName becomes a property on
+	// GeneratedClass; native component properties are inherited from the parent class.
 	FObjectProperty* ComponentProperty = FindFProperty<FObjectProperty>(
 		Blueprint->GeneratedClass, VariableName);
 

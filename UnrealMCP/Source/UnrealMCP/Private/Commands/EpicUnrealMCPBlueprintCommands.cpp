@@ -1864,6 +1864,45 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetBlueprintAvail
     }
 
     const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+
+    // Convert a UFunction signature into a pin description array (skips return params)
+    auto BuildPinArray = [K2Schema](const UFunction* Func) -> TArray<TSharedPtr<FJsonValue>>
+    {
+        TArray<TSharedPtr<FJsonValue>> PinArray;
+        if (!Func)
+        {
+            return PinArray;
+        }
+        for (TFieldIterator<FProperty> PropIt(Func); PropIt && (PropIt->PropertyFlags & CPF_Parm); ++PropIt)
+        {
+            FProperty* Prop = *PropIt;
+            if (Prop->HasAnyPropertyFlags(CPF_ReturnParm))
+            {
+                continue;
+            }
+
+            TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
+            PinObj->SetStringField(TEXT("name"), Prop->GetName());
+
+            FEdGraphPinType PinType;
+            if (K2Schema->ConvertPropertyToPinType(Prop, PinType))
+            {
+                PinObj->SetStringField(TEXT("type"), PinType.PinCategory.ToString());
+                if (PinType.PinSubCategoryObject.IsValid())
+                {
+                    PinObj->SetStringField(TEXT("sub_type"), PinType.PinSubCategoryObject->GetName());
+                }
+            }
+            else
+            {
+                PinObj->SetStringField(TEXT("type"), Prop->GetClass()->GetName());
+            }
+
+            PinArray.Add(MakeShared<FJsonValueObject>(PinObj));
+        }
+        return PinArray;
+    };
+
     TArray<TSharedPtr<FJsonValue>> EventArray;
 
     // Walk the full parent class hierarchy, collecting every BlueprintImplementableEvent
@@ -1892,36 +1931,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetBlueprintAvail
             }
             EventObj->SetStringField(TEXT("event_type"), EventTypeName);
 
-            // Collect parameter output pins from the function signature
-            TArray<TSharedPtr<FJsonValue>> PinArray;
-            for (TFieldIterator<FProperty> PropIt(Func); PropIt && (PropIt->PropertyFlags & CPF_Parm); ++PropIt)
-            {
-                FProperty* Prop = *PropIt;
-                if (Prop->HasAnyPropertyFlags(CPF_ReturnParm))
-                {
-                    continue;
-                }
-
-                TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
-                PinObj->SetStringField(TEXT("name"), Prop->GetName());
-
-                FEdGraphPinType PinType;
-                if (K2Schema->ConvertPropertyToPinType(Prop, PinType))
-                {
-                    PinObj->SetStringField(TEXT("type"), PinType.PinCategory.ToString());
-                    if (PinType.PinSubCategoryObject.IsValid())
-                    {
-                        PinObj->SetStringField(TEXT("sub_type"), PinType.PinSubCategoryObject->GetName());
-                    }
-                }
-                else
-                {
-                    PinObj->SetStringField(TEXT("type"), Prop->GetClass()->GetName());
-                }
-
-                PinArray.Add(MakeShared<FJsonValueObject>(PinObj));
-            }
-            EventObj->SetArrayField(TEXT("pins"), PinArray);
+            EventObj->SetArrayField(TEXT("pins"), BuildPinArray(Func));
 
             EventArray.Add(MakeShared<FJsonValueObject>(EventObj));
         }
@@ -1929,10 +1939,72 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetBlueprintAvail
         CurrentClass = CurrentClass->GetSuperClass();
     }
 
+    // Collect BlueprintAssignable delegates from the Blueprint's components — these are
+    // valid targets for add_node(node_type="ComponentEvent", component_name=…, event_type=…).
+    TArray<TSharedPtr<FJsonValue>> ComponentDelegateArray;
+    TSet<FName> SeenComponents;
+
+    auto AddComponentDelegates = [&](FName ComponentName, UClass* ComponentClass)
+    {
+        if (!ComponentClass || SeenComponents.Contains(ComponentName))
+        {
+            return;
+        }
+        SeenComponents.Add(ComponentName);
+
+        TArray<TSharedPtr<FJsonValue>> DelegateArray;
+        for (TFieldIterator<FMulticastDelegateProperty> DelegateIt(ComponentClass); DelegateIt; ++DelegateIt)
+        {
+            FMulticastDelegateProperty* DelegateProp = *DelegateIt;
+            if (!DelegateProp->HasAnyPropertyFlags(CPF_BlueprintAssignable))
+            {
+                continue;
+            }
+
+            TSharedPtr<FJsonObject> DelegateObj = MakeShared<FJsonObject>();
+            DelegateObj->SetStringField(TEXT("delegate_name"), DelegateProp->GetName());
+            DelegateObj->SetArrayField(TEXT("pins"), BuildPinArray(DelegateProp->SignatureFunction));
+            DelegateArray.Add(MakeShared<FJsonValueObject>(DelegateObj));
+        }
+
+        if (DelegateArray.Num() > 0)
+        {
+            TSharedPtr<FJsonObject> ComponentObj = MakeShared<FJsonObject>();
+            ComponentObj->SetStringField(TEXT("component_name"), ComponentName.ToString());
+            ComponentObj->SetStringField(TEXT("component_class"), ComponentClass->GetName());
+            ComponentObj->SetArrayField(TEXT("delegates"), DelegateArray);
+            ComponentDelegateArray.Add(MakeShared<FJsonValueObject>(ComponentObj));
+        }
+    };
+
+    // Components added in this Blueprint (may not be compiled into the class yet)
+    if (USimpleConstructionScript* SCS = Blueprint->SimpleConstructionScript)
+    {
+        for (USCS_Node* SCSNode : SCS->GetAllNodes())
+        {
+            if (SCSNode && SCSNode->ComponentTemplate)
+            {
+                AddComponentDelegates(SCSNode->GetVariableName(), SCSNode->ComponentTemplate->GetClass());
+            }
+        }
+    }
+
+    // Native C++ components and components inherited from parent Blueprints — these
+    // appear as object properties on the class chain rather than in this SCS
+    UClass* ComponentSearchClass = Blueprint->GeneratedClass ? *Blueprint->GeneratedClass : *Blueprint->ParentClass;
+    for (TFieldIterator<FObjectProperty> PropIt(ComponentSearchClass); PropIt; ++PropIt)
+    {
+        if (PropIt->PropertyClass && PropIt->PropertyClass->IsChildOf(UActorComponent::StaticClass()))
+        {
+            AddComponentDelegates(PropIt->GetFName(), PropIt->PropertyClass);
+        }
+    }
+
     TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetBoolField(TEXT("success"), true);
     Result->SetArrayField(TEXT("events"), EventArray);
     Result->SetNumberField(TEXT("count"), EventArray.Num());
+    Result->SetArrayField(TEXT("component_delegates"), ComponentDelegateArray);
     Result->SetStringField(TEXT("blueprint_path"), BlueprintPath);
     return Result;
 }
