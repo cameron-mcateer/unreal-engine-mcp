@@ -166,9 +166,17 @@ UBlueprint* FEpicUnrealMCPCommonUtils::FindBlueprintByName(const FString& Bluepr
     // Check if BlueprintName is already a full path (starts with /)
     if (BlueprintName.StartsWith(TEXT("/")))
     {
-        // It's already a full path, use it directly with the class suffix
-        FString AssetName = FPaths::GetBaseFilename(BlueprintName);
-        ObjectPath = FString::Printf(TEXT("%s.%s"), *BlueprintName, *AssetName);
+        if (BlueprintName.Contains(TEXT(".")))
+        {
+            // Already an object path (/Game/Path/Asset.Asset) — use as-is
+            ObjectPath = BlueprintName;
+        }
+        else
+        {
+            // Package path — append the asset name to form the object path
+            FString AssetName = FPaths::GetBaseFilename(BlueprintName);
+            ObjectPath = FString::Printf(TEXT("%s.%s"), *BlueprintName, *AssetName);
+        }
     }
     else
     {
@@ -199,11 +207,14 @@ UBlueprint* FEpicUnrealMCPCommonUtils::FindBlueprintByName(const FString& Bluepr
 
     // Fallback for cases where the asset is in memory but not yet fully saved,
     // where it might be found via its package path.
-    FString PackagePath = TEXT("/Game/Blueprints/") + BlueprintName;
-    Blueprint = FindObject<UBlueprint>(nullptr, *PackagePath);
-    if (Blueprint)
+    if (!BlueprintName.StartsWith(TEXT("/")))
     {
-        return Blueprint;
+        FString PackagePath = TEXT("/Game/Blueprints/") + BlueprintName;
+        Blueprint = FindObject<UBlueprint>(nullptr, *PackagePath);
+        if (Blueprint)
+        {
+            return Blueprint;
+        }
     }
 
     // Short names are not restricted to /Game/Blueprints/ — search the whole

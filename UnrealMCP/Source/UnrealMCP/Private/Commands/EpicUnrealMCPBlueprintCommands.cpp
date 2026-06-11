@@ -1394,11 +1394,13 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleReadBlueprintCont
     Params->TryGetBoolField(TEXT("include_components"), bIncludeComponents);
     Params->TryGetBoolField(TEXT("include_interfaces"), bIncludeInterfaces);
 
-    // Load the blueprint
-    UBlueprint* Blueprint = Cast<UBlueprint>(UEditorAssetLibrary::LoadAsset(BlueprintPath));
+    // Load the blueprint (LoadObject-first; UEditorAssetLibrary::LoadAsset only
+    // resolves through the asset registry, which misses assets it hasn't indexed yet)
+    FString FindError;
+    UBlueprint* Blueprint = FEpicUnrealMCPCommonUtils::FindBlueprintByName(BlueprintPath, FindError);
     if (!Blueprint)
     {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load blueprint: %s"), *BlueprintPath));
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load blueprint: %s (%s)"), *BlueprintPath, *FindError));
     }
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
@@ -1537,11 +1539,13 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleAnalyzeBlueprintG
     Params->TryGetBoolField(TEXT("include_pin_connections"), bIncludePinConnections);
     Params->TryGetBoolField(TEXT("trace_execution_flow"), bTraceExecutionFlow);
 
-    // Load the blueprint
-    UBlueprint* Blueprint = Cast<UBlueprint>(UEditorAssetLibrary::LoadAsset(BlueprintPath));
+    // Load the blueprint (LoadObject-first; UEditorAssetLibrary::LoadAsset only
+    // resolves through the asset registry, which misses assets it hasn't indexed yet)
+    FString FindError;
+    UBlueprint* Blueprint = FEpicUnrealMCPCommonUtils::FindBlueprintByName(BlueprintPath, FindError);
     if (!Blueprint)
     {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load blueprint: %s"), *BlueprintPath));
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load blueprint: %s (%s)"), *BlueprintPath, *FindError));
     }
 
     // Find the specified graph
@@ -1660,11 +1664,13 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetBlueprintVaria
     FString VariableName;
     bool bSpecificVariable = Params->TryGetStringField(TEXT("variable_name"), VariableName);
 
-    // Load the blueprint
-    UBlueprint* Blueprint = Cast<UBlueprint>(UEditorAssetLibrary::LoadAsset(BlueprintPath));
+    // Load the blueprint (LoadObject-first; UEditorAssetLibrary::LoadAsset only
+    // resolves through the asset registry, which misses assets it hasn't indexed yet)
+    FString FindError;
+    UBlueprint* Blueprint = FEpicUnrealMCPCommonUtils::FindBlueprintByName(BlueprintPath, FindError);
     if (!Blueprint)
     {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load blueprint: %s"), *BlueprintPath));
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load blueprint: %s (%s)"), *BlueprintPath, *FindError));
     }
 
     TArray<TSharedPtr<FJsonValue>> VariableArray;
@@ -1754,11 +1760,13 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetBlueprintFunct
     bool bIncludeGraph = true;
     Params->TryGetBoolField(TEXT("include_graph"), bIncludeGraph);
 
-    // Load the blueprint
-    UBlueprint* Blueprint = Cast<UBlueprint>(UEditorAssetLibrary::LoadAsset(BlueprintPath));
+    // Load the blueprint (LoadObject-first; UEditorAssetLibrary::LoadAsset only
+    // resolves through the asset registry, which misses assets it hasn't indexed yet)
+    FString FindError;
+    UBlueprint* Blueprint = FEpicUnrealMCPCommonUtils::FindBlueprintByName(BlueprintPath, FindError);
     if (!Blueprint)
     {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load blueprint: %s"), *BlueprintPath));
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load blueprint: %s (%s)"), *BlueprintPath, *FindError));
     }
 
     TArray<TSharedPtr<FJsonValue>> FunctionArray;
@@ -1873,18 +1881,17 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetBlueprintAvail
     FString BlueprintPath;
     if (!Params->TryGetStringField(TEXT("blueprint_path"), BlueprintPath))
     {
-        FString BlueprintName;
-        if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName))
+        if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintPath))
         {
             return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'blueprint_path' or 'blueprint_name' parameter"));
         }
-        BlueprintPath = BlueprintName.StartsWith(TEXT("/")) ? BlueprintName : (TEXT("/Game/Blueprints/") + BlueprintName);
     }
 
-    UBlueprint* Blueprint = Cast<UBlueprint>(UEditorAssetLibrary::LoadAsset(BlueprintPath));
+    FString FindError;
+    UBlueprint* Blueprint = FEpicUnrealMCPCommonUtils::FindBlueprintByName(BlueprintPath, FindError);
     if (!Blueprint)
     {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load blueprint: %s"), *BlueprintPath));
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to load blueprint: %s (%s)"), *BlueprintPath, *FindError));
     }
 
     const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
