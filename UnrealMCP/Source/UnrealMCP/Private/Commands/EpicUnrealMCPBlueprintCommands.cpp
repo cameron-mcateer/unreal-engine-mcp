@@ -8,6 +8,7 @@
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Components/BoxComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/PrimitiveComponent.h"
@@ -239,43 +240,100 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleAddComponentToBlu
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
     }
 
-    // Create the component - dynamically find the component class by name
-    UClass* ComponentClass = nullptr;
+    // Resolve the component class. Accepts class names with or without the
+    // "Component" suffix or "U" prefix ("StaticMeshComponent", "PointLight",
+    // "USphereComponent"), full paths ("/Script/Engine.StaticMeshComponent"),
+    // and basic shape aliases (Cube, Sphere, Cylinder, Cone, Plane) which create
+    // a StaticMeshComponent with the matching /Engine/BasicShapes mesh assigned.
+    static const TMap<FString, FString> BasicShapeMeshes = {
+        { TEXT("Cube"),     TEXT("/Engine/BasicShapes/Cube.Cube") },
+        { TEXT("Sphere"),   TEXT("/Engine/BasicShapes/Sphere.Sphere") },
+        { TEXT("Cylinder"), TEXT("/Engine/BasicShapes/Cylinder.Cylinder") },
+        { TEXT("Cone"),     TEXT("/Engine/BasicShapes/Cone.Cone") },
+        { TEXT("Plane"),    TEXT("/Engine/BasicShapes/Plane.Plane") },
+    };
 
-    // Try to find the class with exact name first
-    ComponentClass = FindObject<UClass>(nullptr, *ComponentType);
-    
-    // If not found, try with "Component" suffix
-    if (!ComponentClass && !ComponentType.EndsWith(TEXT("Component")))
+    UClass* ComponentClass = nullptr;
+    FString BasicShapeMeshPath;
+
+    if (const FString* ShapeMesh = BasicShapeMeshes.Find(ComponentType))
     {
-        FString ComponentTypeWithSuffix = ComponentType + TEXT("Component");
-        ComponentClass = FindObject<UClass>(nullptr, *ComponentTypeWithSuffix);
+        ComponentClass = UStaticMeshComponent::StaticClass();
+        BasicShapeMeshPath = *ShapeMesh;
     }
-    
-    // If still not found, try with "U" prefix
-    if (!ComponentClass && !ComponentType.StartsWith(TEXT("U")))
+    else
     {
-        FString ComponentTypeWithPrefix = TEXT("U") + ComponentType;
-        ComponentClass = FindObject<UClass>(nullptr, *ComponentTypeWithPrefix);
-        
-        // Try with both prefix and suffix
-        if (!ComponentClass && !ComponentType.EndsWith(TEXT("Component")))
+        // Full asset paths (Blueprint component classes) need LoadObject
+        if (ComponentType.StartsWith(TEXT("/")) && !ComponentType.StartsWith(TEXT("/Script/")))
         {
-            FString ComponentTypeWithBoth = TEXT("U") + ComponentType + TEXT("Component");
-            ComponentClass = FindObject<UClass>(nullptr, *ComponentTypeWithBoth);
+            FString ClassPath = ComponentType;
+            if (!ClassPath.EndsWith(TEXT("_C")))
+            {
+                FString AssetName = FPaths::GetBaseFilename(ClassPath);
+                ClassPath = ClassPath.Contains(TEXT("."))
+                    ? ClassPath + TEXT("_C")
+                    : FString::Printf(TEXT("%s.%s_C"), *ClassPath, *AssetName);
+            }
+            ComponentClass = LoadObject<UClass>(nullptr, *ClassPath);
+        }
+        else
+        {
+            // TryFindTypeSlow resolves both short names and /Script/ paths
+            // (FindObject with a null outer no longer accepts short names)
+            TArray<FString> Candidates;
+            Candidates.Add(ComponentType);
+            if (!ComponentType.EndsWith(TEXT("Component")))
+            {
+                Candidates.Add(ComponentType + TEXT("Component"));
+            }
+            if (ComponentType.Len() > 1 && ComponentType[0] == TEXT('U') && FChar::IsUpper(ComponentType[1]))
+            {
+                FString Stripped = ComponentType.RightChop(1);
+                Candidates.Add(Stripped);
+                if (!Stripped.EndsWith(TEXT("Component")))
+                {
+                    Candidates.Add(Stripped + TEXT("Component"));
+                }
+            }
+            for (const FString& Candidate : Candidates)
+            {
+                ComponentClass = UClass::TryFindTypeSlow<UClass>(Candidate);
+                if (ComponentClass)
+                {
+                    break;
+                }
+            }
         }
     }
-    
-    // Verify that the class is a valid component type
+
+    // Verify that the class is a valid, spawnable component type
     if (!ComponentClass || !ComponentClass->IsChildOf(UActorComponent::StaticClass()))
     {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown component type: %s"), *ComponentType));
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(
+            TEXT("Unknown component type: %s. Use an engine component class name (e.g. \"StaticMeshComponent\", \"PointLightComponent\", \"SphereComponent\"), a class path (\"/Script/Engine.StaticMeshComponent\"), or a basic shape alias (Cube, Sphere, Cylinder, Cone, Plane)."),
+            *ComponentType));
+    }
+    if (ComponentClass->HasAnyClassFlags(CLASS_Abstract))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Component class is abstract: %s"), *ComponentClass->GetName()));
     }
 
     // Add the component to the blueprint
     USCS_Node* NewNode = Blueprint->SimpleConstructionScript->CreateNode(ComponentClass, *ComponentName);
     if (NewNode)
     {
+        // Assign the engine mesh when a basic shape alias was used
+        if (!BasicShapeMeshPath.IsEmpty())
+        {
+            if (UStaticMeshComponent* MeshTemplate = Cast<UStaticMeshComponent>(NewNode->ComponentTemplate))
+            {
+                if (UStaticMesh* ShapeMesh = LoadObject<UStaticMesh>(nullptr, *BasicShapeMeshPath))
+                {
+                    MeshTemplate->SetStaticMesh(ShapeMesh);
+                }
+            }
+        }
+
         // Set transform if provided
         USceneComponent* SceneComponent = Cast<USceneComponent>(NewNode->ComponentTemplate);
         if (SceneComponent)
@@ -331,23 +389,15 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleSetPhysicsPropert
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
     }
 
-    // Find the component
-    USCS_Node* ComponentNode = nullptr;
-    for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+    // Find the component template (Blueprint-added or inherited native C++ component)
+    FString ComponentError;
+    UActorComponent* ComponentTemplate = FEpicUnrealMCPCommonUtils::FindComponentTemplate(Blueprint, ComponentName, ComponentError);
+    if (!ComponentTemplate)
     {
-        if (Node && Node->GetVariableName().ToString() == ComponentName)
-        {
-            ComponentNode = Node;
-            break;
-        }
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(ComponentError);
     }
 
-    if (!ComponentNode)
-    {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Component not found: %s"), *ComponentName));
-    }
-
-    UPrimitiveComponent* PrimComponent = Cast<UPrimitiveComponent>(ComponentNode->ComponentTemplate);
+    UPrimitiveComponent* PrimComponent = Cast<UPrimitiveComponent>(ComponentTemplate);
     if (!PrimComponent)
     {
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Component is not a primitive component"));
@@ -703,23 +753,15 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleSetStaticMeshProp
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
     }
 
-    // Find the component
-    USCS_Node* ComponentNode = nullptr;
-    for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+    // Find the component template (Blueprint-added or inherited native C++ component)
+    FString ComponentError;
+    UActorComponent* ComponentTemplate = FEpicUnrealMCPCommonUtils::FindComponentTemplate(Blueprint, ComponentName, ComponentError);
+    if (!ComponentTemplate)
     {
-        if (Node && Node->GetVariableName().ToString() == ComponentName)
-        {
-            ComponentNode = Node;
-            break;
-        }
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(ComponentError);
     }
 
-    if (!ComponentNode)
-    {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Component not found: %s"), *ComponentName));
-    }
-
-    UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(ComponentNode->ComponentTemplate);
+    UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(ComponentTemplate);
     if (!MeshComponent)
     {
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Component is not a static mesh component"));
@@ -776,24 +818,16 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleSetMeshMaterialCo
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
     }
 
-    // Find the component
-    USCS_Node* ComponentNode = nullptr;
-    for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+    // Find the component template (Blueprint-added or inherited native C++ component)
+    FString ComponentError;
+    UActorComponent* ComponentTemplate = FEpicUnrealMCPCommonUtils::FindComponentTemplate(Blueprint, ComponentName, ComponentError);
+    if (!ComponentTemplate)
     {
-        if (Node && Node->GetVariableName().ToString() == ComponentName)
-        {
-            ComponentNode = Node;
-            break;
-        }
-    }
-
-    if (!ComponentNode)
-    {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Component not found: %s"), *ComponentName));
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(ComponentError);
     }
 
     // Try to cast to StaticMeshComponent or PrimitiveComponent
-    UPrimitiveComponent* PrimComponent = Cast<UPrimitiveComponent>(ComponentNode->ComponentTemplate);
+    UPrimitiveComponent* PrimComponent = Cast<UPrimitiveComponent>(ComponentTemplate);
     if (!PrimComponent)
     {
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Component is not a primitive component"));
@@ -1157,23 +1191,15 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleApplyMaterialToBl
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
     }
 
-    // Find the component
-    USCS_Node* ComponentNode = nullptr;
-    for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+    // Find the component template (Blueprint-added or inherited native C++ component)
+    FString ComponentError;
+    UActorComponent* ComponentTemplate = FEpicUnrealMCPCommonUtils::FindComponentTemplate(Blueprint, ComponentName, ComponentError);
+    if (!ComponentTemplate)
     {
-        if (Node && Node->GetVariableName().ToString() == ComponentName)
-        {
-            ComponentNode = Node;
-            break;
-        }
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(ComponentError);
     }
 
-    if (!ComponentNode)
-    {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Component not found: %s"), *ComponentName));
-    }
-
-    UPrimitiveComponent* PrimComponent = Cast<UPrimitiveComponent>(ComponentNode->ComponentTemplate);
+    UPrimitiveComponent* PrimComponent = Cast<UPrimitiveComponent>(ComponentTemplate);
     if (!PrimComponent)
     {
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Component is not a primitive component"));
@@ -1301,23 +1327,15 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleGetBlueprintMater
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
     }
 
-    // Find the component
-    USCS_Node* ComponentNode = nullptr;
-    for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+    // Find the component template (Blueprint-added or inherited native C++ component)
+    FString ComponentError;
+    UActorComponent* ComponentTemplate = FEpicUnrealMCPCommonUtils::FindComponentTemplate(Blueprint, ComponentName, ComponentError);
+    if (!ComponentTemplate)
     {
-        if (Node && Node->GetVariableName().ToString() == ComponentName)
-        {
-            ComponentNode = Node;
-            break;
-        }
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(ComponentError);
     }
 
-    if (!ComponentNode)
-    {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Component not found: %s"), *ComponentName));
-    }
-
-    UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(ComponentNode->ComponentTemplate);
+    UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(ComponentTemplate);
     if (!MeshComponent)
     {
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Component is not a static mesh component"));

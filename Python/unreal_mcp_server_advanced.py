@@ -604,7 +604,23 @@ def add_component_to_blueprint(
     scale: List[float] = [],
     component_properties: Dict[str, Any] = {}
 ) -> Dict[str, Any]:
-    """Add a component to a Blueprint."""
+    """Add a component to a Blueprint.
+
+    Args:
+        blueprint_name: Full asset path ("/Game/Path/BP_Name") or short name.
+        component_type: One of:
+            - An engine component class name, with or without the "Component"
+              suffix: "StaticMeshComponent", "PointLight", "SphereComponent",
+              "SpotLightComponent", "BoxComponent", "AudioComponent", ...
+            - A class path: "/Script/Engine.StaticMeshComponent"
+            - A Blueprint component class asset path: "/Game/Path/BP_MyComponent"
+            - A basic shape alias — "Cube", "Sphere", "Cylinder", "Cone",
+              "Plane" — which creates a StaticMeshComponent with the matching
+              /Engine/BasicShapes mesh already assigned.
+        component_name: Name for the new component.
+        location/rotation/scale: Optional relative transform as [X, Y, Z] /
+            [Pitch, Yaw, Roll] lists.
+    """
     unreal = get_unreal_connection()
     if not unreal:
         return {"success": False, "message": "Failed to connect to Unreal Engine"}
@@ -631,7 +647,13 @@ def set_static_mesh_properties(
     component_name: str,
     static_mesh: str = "/Engine/BasicShapes/Cube.Cube"
 ) -> Dict[str, Any]:
-    """Set static mesh properties on a StaticMeshComponent."""
+    """Set static mesh properties on a StaticMeshComponent.
+
+    component_name resolves both Blueprint-added components and components
+    inherited from a native C++ parent class (e.g. a CreateDefaultSubobject
+    mesh like "PickupMesh"). Components added by a parent Blueprint are not
+    supported.
+    """
     unreal = get_unreal_connection()
     if not unreal:
         return {"success": False, "message": "Failed to connect to Unreal Engine"}
@@ -1721,7 +1743,13 @@ def set_mesh_material_color(
     parameter_name: str = "BaseColor",
     material_slot: int = 0
 ) -> Dict[str, Any]:
-    """Set material color on a mesh component using the proven color system."""
+    """Set material color on a mesh component using the proven color system.
+
+    component_name resolves both Blueprint-added components and components
+    inherited from a native C++ parent class (e.g. a CreateDefaultSubobject
+    mesh like "PickupMesh"). Components added by a parent Blueprint are not
+    supported.
+    """
     unreal = get_unreal_connection()
     if not unreal:
         return {"success": False, "message": "Failed to connect to Unreal Engine"}

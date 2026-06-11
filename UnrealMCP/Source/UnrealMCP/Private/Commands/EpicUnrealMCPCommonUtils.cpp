@@ -22,6 +22,9 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/ARFilter.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/SimpleConstructionScript.h"
+#include "Engine/SCS_Node.h"
+#include "Components/ActorComponent.h"
 #include "BlueprintNodeSpawner.h"
 #include "BlueprintActionDatabase.h"
 #include "Dom/JsonObject.h"
@@ -254,6 +257,48 @@ UBlueprint* FEpicUnrealMCPCommonUtils::FindBlueprintByName(const FString& Bluepr
 
     OutError = FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName);
     UE_LOG(LogTemp, Error, TEXT("FindBlueprintByName: Failed to find or load blueprint: %s"), *BlueprintName);
+    return nullptr;
+}
+
+UActorComponent* FEpicUnrealMCPCommonUtils::FindComponentTemplate(UBlueprint* Blueprint, const FString& ComponentName, FString& OutError)
+{
+    if (!Blueprint)
+    {
+        OutError = TEXT("Invalid blueprint");
+        return nullptr;
+    }
+
+    // Blueprint-added components live in the SimpleConstructionScript
+    if (Blueprint->SimpleConstructionScript)
+    {
+        for (USCS_Node* Node : Blueprint->SimpleConstructionScript->GetAllNodes())
+        {
+            if (Node && Node->ComponentTemplate && Node->GetVariableName().ToString() == ComponentName)
+            {
+                return Node->ComponentTemplate;
+            }
+        }
+    }
+
+    // Native components (C++ CreateDefaultSubobject) live on the generated-class
+    // CDO, which is serialized with the Blueprint, so edits persist as defaults.
+    if (UClass* GeneratedClass = Blueprint->GeneratedClass)
+    {
+        if (AActor* CDO = Cast<AActor>(GeneratedClass->GetDefaultObject()))
+        {
+            for (UActorComponent* Component : CDO->GetComponents())
+            {
+                if (Component && Component->GetName() == ComponentName)
+                {
+                    return Component;
+                }
+            }
+        }
+    }
+
+    OutError = FString::Printf(
+        TEXT("Component not found: %s (searched the Blueprint's own components and native C++ components; components added by a parent Blueprint are not supported)"),
+        *ComponentName);
     return nullptr;
 }
 

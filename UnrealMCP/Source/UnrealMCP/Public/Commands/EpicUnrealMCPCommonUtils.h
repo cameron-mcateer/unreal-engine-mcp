@@ -16,6 +16,7 @@ class UK2Node_VariableSet;
 class UK2Node_InputAction;
 class UK2Node_Self;
 class UFunction;
+class UActorComponent;
 
 /**
  * Common utilities for EpicUnrealMCP commands
@@ -41,6 +42,13 @@ public:
     static UBlueprint* FindBlueprintByName(const FString& BlueprintName);
     static UBlueprint* FindBlueprintByName(const FString& BlueprintName, FString& OutError);
     static UEdGraph* FindOrCreateEventGraph(UBlueprint* Blueprint);
+
+    // Component utilities
+    // Resolves a component template for editing Blueprint defaults: searches the
+    // Blueprint's own SCS nodes first, then native (C++ CreateDefaultSubobject)
+    // components on the generated-class CDO. Returns nullptr and sets OutError if
+    // the component cannot be found.
+    static UActorComponent* FindComponentTemplate(UBlueprint* Blueprint, const FString& ComponentName, FString& OutError);
     
     // Blueprint node utilities
     static UK2Node_Event* CreateEventNode(UEdGraph* Graph, const FString& EventName, const FVector2D& Position);
