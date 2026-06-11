@@ -28,8 +28,6 @@
 #include "EditorAssetLibrary.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "GameFramework/Actor.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "Subsystems/EditorActorSubsystem.h"
 
@@ -134,61 +132,33 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleCreateBlueprint(c
         return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint already exists: %s"), *BlueprintName));
     }
 
-    // Create the blueprint factory
-    UBlueprintFactory* Factory = NewObject<UBlueprintFactory>();
-    
-    // Handle parent class
+    // Handle parent class — default to Actor when not specified, error when
+    // specified but unresolved (a silent Actor fallback leaves the caller with
+    // a Blueprint whose inherited members don't exist)
     FString ParentClass;
     Params->TryGetStringField(TEXT("parent_class"), ParentClass);
-    
-    // Default to Actor if no parent class specified
+
     UClass* SelectedParentClass = AActor::StaticClass();
-    
-    // Try to find the specified parent class
     if (!ParentClass.IsEmpty())
     {
-        FString ClassName = ParentClass;
-        if (!ClassName.StartsWith(TEXT("A")))
+        SelectedParentClass = FEpicUnrealMCPCommonUtils::ResolveClassByName(ParentClass);
+        if (!SelectedParentClass)
         {
-            ClassName = TEXT("A") + ClassName;
-        }
-        
-        // First try direct StaticClass lookup for common classes
-        UClass* FoundClass = nullptr;
-        if (ClassName == TEXT("APawn"))
-        {
-            FoundClass = APawn::StaticClass();
-        }
-        else if (ClassName == TEXT("AActor"))
-        {
-            FoundClass = AActor::StaticClass();
-        }
-        else
-        {
-            // Try loading the class using LoadClass which is more reliable than FindObject
-            const FString ClassPath = FString::Printf(TEXT("/Script/Engine.%s"), *ClassName);
-            FoundClass = LoadClass<AActor>(nullptr, *ClassPath);
-            
-            if (!FoundClass)
-            {
-                // Try alternate paths if not found
-                const FString GameClassPath = FString::Printf(TEXT("/Script/Game.%s"), *ClassName);
-                FoundClass = LoadClass<AActor>(nullptr, *GameClassPath);
-            }
-        }
-
-        if (FoundClass)
-        {
-            SelectedParentClass = FoundClass;
-            UE_LOG(LogTemp, Log, TEXT("Successfully set parent class to '%s'"), *ClassName);
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("Could not find specified parent class '%s' at paths: /Script/Engine.%s or /Script/Game.%s, defaulting to AActor"), 
-                *ClassName, *ClassName, *ClassName);
+            return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(
+                TEXT("Parent class '%s' could not be resolved. Use a native class name (\"Actor\", \"PickupActor\"), a /Script/ path (\"/Script/MyModule.MyActor\"), or a Blueprint asset path (\"/Game/Blueprints/BP_Base\"). If the class is new C++ code, it must be compiled and loaded in the editor first."),
+                *ParentClass));
         }
     }
-    
+
+    // The factory opens a modal dialog for non-blueprintable parents — check
+    // here so a headless command returns an error instead of blocking the editor
+    if (!FKismetEditorUtilities::CanCreateBlueprintOfClass(SelectedParentClass))
+    {
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(
+            TEXT("Cannot create a Blueprint based on class '%s'"), *SelectedParentClass->GetName()));
+    }
+
+    UBlueprintFactory* Factory = NewObject<UBlueprintFactory>();
     Factory->ParentClass = SelectedParentClass;
 
     // Create the blueprint
@@ -206,6 +176,7 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleCreateBlueprint(c
         TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
         ResultObj->SetStringField(TEXT("name"), AssetName);
         ResultObj->SetStringField(TEXT("path"), PackagePath + AssetName);
+        ResultObj->SetStringField(TEXT("parent_class"), SelectedParentClass->GetName());
         return ResultObj;
     }
 
@@ -540,64 +511,12 @@ TSharedPtr<FJsonObject> FEpicUnrealMCPBlueprintCommands::HandleReparentBlueprint
     FString OldParentName = Blueprint->ParentClass ? Blueprint->ParentClass->GetName() : TEXT("None");
 
     // Resolve the new parent class
-    UClass* ResolvedParentClass = nullptr;
-
-    // If it looks like an asset path, try loading as a Blueprint parent
-    if (NewParentClass.StartsWith(TEXT("/")))
-    {
-        // Try loading as a Blueprint asset first
-        FString AssetName = FPaths::GetBaseFilename(NewParentClass);
-        FString ObjectPath = FString::Printf(TEXT("%s.%s"), *NewParentClass, *AssetName);
-        UBlueprint* ParentBlueprint = LoadObject<UBlueprint>(nullptr, *ObjectPath);
-        if (ParentBlueprint && ParentBlueprint->GeneratedClass)
-        {
-            ResolvedParentClass = ParentBlueprint->GeneratedClass;
-        }
-        else
-        {
-            // Try loading as a native class path
-            ResolvedParentClass = LoadClass<UObject>(nullptr, *NewParentClass);
-        }
-    }
-    else
-    {
-        // Short name — try common native classes
-        FString ClassName = NewParentClass;
-        if (!ClassName.StartsWith(TEXT("A")))
-        {
-            ClassName = TEXT("A") + ClassName;
-        }
-
-        if (ClassName == TEXT("AActor"))
-        {
-            ResolvedParentClass = AActor::StaticClass();
-        }
-        else if (ClassName == TEXT("APawn"))
-        {
-            ResolvedParentClass = APawn::StaticClass();
-        }
-        else if (ClassName == TEXT("ACharacter"))
-        {
-            ResolvedParentClass = ACharacter::StaticClass();
-        }
-        else
-        {
-            // Try /Script/Engine path
-            const FString EnginePath = FString::Printf(TEXT("/Script/Engine.%s"), *ClassName);
-            ResolvedParentClass = LoadClass<UObject>(nullptr, *EnginePath);
-
-            if (!ResolvedParentClass)
-            {
-                // Try /Script/Game path (project classes)
-                const FString GamePath = FString::Printf(TEXT("/Script/Game.%s"), *ClassName);
-                ResolvedParentClass = LoadClass<UObject>(nullptr, *GamePath);
-            }
-        }
-    }
-
+    UClass* ResolvedParentClass = FEpicUnrealMCPCommonUtils::ResolveClassByName(NewParentClass);
     if (!ResolvedParentClass)
     {
-        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Class '%s' could not be resolved"), *NewParentClass));
+        return FEpicUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(
+            TEXT("Parent class '%s' could not be resolved. Use a native class name (\"Actor\", \"PickupActor\"), a /Script/ path (\"/Script/MyModule.MyActor\"), or a Blueprint asset path (\"/Game/Blueprints/BP_Base\"). If the class is new C++ code, it must be compiled and loaded in the editor first."),
+            *NewParentClass));
     }
 
     // Perform the reparent (mirrors UBlueprintEditorLibrary::ReparentBlueprint

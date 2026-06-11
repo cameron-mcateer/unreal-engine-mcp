@@ -43,6 +43,13 @@ public:
     static UBlueprint* FindBlueprintByName(const FString& BlueprintName, FString& OutError);
     static UEdGraph* FindOrCreateEventGraph(UBlueprint* Blueprint);
 
+    // Class utilities
+    // Resolves a class reference to a UClass*: accepts short native class names
+    // with or without the A/U code prefix ("PickupActor", "APickupActor"),
+    // /Script/ paths ("/Script/RiftRunners.PickupActor"), and Blueprint asset
+    // paths ("/Game/Blueprints/BP_Base"). Returns nullptr if unresolved.
+    static UClass* ResolveClassByName(const FString& ClassName);
+
     // Component utilities
     // Resolves a component template for editing Blueprint defaults: searches the
     // Blueprint's own SCS nodes first, then native (C++ CreateDefaultSubobject)

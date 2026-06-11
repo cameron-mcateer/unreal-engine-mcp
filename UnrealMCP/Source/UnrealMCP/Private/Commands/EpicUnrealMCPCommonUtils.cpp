@@ -260,6 +260,51 @@ UBlueprint* FEpicUnrealMCPCommonUtils::FindBlueprintByName(const FString& Bluepr
     return nullptr;
 }
 
+UClass* FEpicUnrealMCPCommonUtils::ResolveClassByName(const FString& ClassName)
+{
+    if (ClassName.IsEmpty())
+    {
+        return nullptr;
+    }
+
+    // /Script/ paths reference a native class directly
+    if (ClassName.StartsWith(TEXT("/Script/")))
+    {
+        return LoadClass<UObject>(nullptr, *ClassName);
+    }
+
+    // Other asset paths reference a Blueprint class
+    if (ClassName.StartsWith(TEXT("/")))
+    {
+        FString ObjectPath = ClassName;
+        if (!ObjectPath.Contains(TEXT(".")))
+        {
+            ObjectPath = FString::Printf(TEXT("%s.%s"), *ClassName, *FPaths::GetBaseFilename(ClassName));
+        }
+        if (UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *ObjectPath))
+        {
+            return Blueprint->GeneratedClass;
+        }
+        // Allow direct generated-class paths (/Game/Blueprints/BP_Base.BP_Base_C)
+        return LoadObject<UClass>(nullptr, *ObjectPath);
+    }
+
+    // Short name — TryFindTypeSlow searches all loaded modules (engine and game
+    // alike), unlike FindObject which no longer accepts short names. Class
+    // object names carry no A/U code prefix, so strip one if present.
+    constexpr EFindFirstObjectOptions Options =
+        EFindFirstObjectOptions::NativeFirst | EFindFirstObjectOptions::EnsureIfAmbiguous;
+    if (UClass* FoundClass = UClass::TryFindTypeSlow<UClass>(ClassName, Options))
+    {
+        return FoundClass;
+    }
+    if (ClassName.Len() > 1 && (ClassName[0] == TEXT('A') || ClassName[0] == TEXT('U')) && FChar::IsUpper(ClassName[1]))
+    {
+        return UClass::TryFindTypeSlow<UClass>(ClassName.RightChop(1), Options);
+    }
+    return nullptr;
+}
+
 UActorComponent* FEpicUnrealMCPCommonUtils::FindComponentTemplate(UBlueprint* Blueprint, const FString& ComponentName, FString& OutError)
 {
     if (!Blueprint)

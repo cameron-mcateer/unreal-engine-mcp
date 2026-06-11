@@ -631,7 +631,20 @@ def set_actor_transform(
 # Essential Blueprint Tools for Physics Actors
 @mcp.tool()
 def create_blueprint(name: str, parent_class: str) -> Dict[str, Any]:
-    """Create a new Blueprint class."""
+    """Create a new Blueprint class under /Game/Blueprints/.
+
+    Args:
+        name: Name for the new Blueprint asset (e.g. "BP_Enemy").
+        parent_class: Parent class as a short native name — engine or game
+            module, with or without the A/U prefix ("Actor", "Character",
+            "PickupActor") — a /Script/ path ("/Script/MyModule.MyActor"), or
+            a Blueprint asset path ("/Game/Blueprints/BP_Base").
+
+    Returns:
+        name/path/parent_class of the created Blueprint. Errors if the parent
+        class cannot be resolved (e.g. C++ class not yet compiled into the
+        running editor) — it does NOT fall back to Actor.
+    """
     unreal = get_unreal_connection()
     if not unreal:
         return {"success": False, "message": "Failed to connect to Unreal Engine"}
@@ -823,8 +836,10 @@ def reparent_blueprint(blueprint_name: str, new_parent_class: str) -> Dict[str, 
 
     Args:
         blueprint_name: Name or path of the Blueprint (e.g. "BP_Enemy" or "/Game/Blueprints/BP_Enemy").
-        new_parent_class: Short native name ("Character", "Pawn", "Actor") or full
-            asset path ("/Game/Blueprints/BP_MyBase") for the new parent class.
+        new_parent_class: Short native name — engine or game module, with or
+            without the A/U prefix ("Character", "Pawn", "PickupActor") — a
+            /Script/ path ("/Script/MyModule.MyActor"), or a Blueprint asset
+            path ("/Game/Blueprints/BP_MyBase").
 
     Returns:
         blueprint: Name of the Blueprint.
